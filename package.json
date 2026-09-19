@@ -9,9 +9,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "geo": "npm --prefix tools/geo-pipeline run all && node tools/copy-geo.mjs"
+    "geo": "npm --prefix tools/geo-pipeline run all && node tools/copy-geo.mjs",
+    "icons": "node tools/gen-icons.mjs",
+    "deploy:cf": "npx wrangler pages deploy dist --project-name scratch-globe",
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync",
+    "android:open": "npx cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "exifr": "^7.1.3",
     "globe.gl": "^2.46.2",
     "idb": "^8.0.3",
@@ -21,12 +29,14 @@
     "topojson-client": "^3.1.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/geojson": "^7946.0.16",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react": "^4.4.0",
     "typescript": "^5.8.0",
-    "vite": "^6.3.0"
+    "vite": "^6.3.0",
+    "vite-plugin-pwa": "^1.3.0"
   }
 }

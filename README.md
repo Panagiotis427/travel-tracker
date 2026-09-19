@@ -17,6 +17,8 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Manual UI (Tier 0): status + dates/duration/note per place | Done |
 | Persistence (IndexedDB) + JSON export/import | Done |
 | EXIF import (Tier 1): drop photos -> auto-mark countries + regions | Done (web) |
+| PWA: installable + offline (service worker) | Done |
+| Deploy (GitHub Pages / Cloudflare) + Capacitor Android | Ready — see `docs/DEPLOY.md` |
 
 ## Run it
 

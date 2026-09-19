@@ -5,7 +5,13 @@ tools/geo-pipeline/.tmp/
 # os
 Thumbs.db
 .DS_Store
-# app build dirs (added once framework is chosen)
+# app build dirs
 build/
 dist/
+dev-dist/
 .dart_tool/
+# capacitor native projects (generated; rebuilt via `npx cap add`)
+/android/
+/ios/
+# wrangler / cloudflare
+.wrangler/

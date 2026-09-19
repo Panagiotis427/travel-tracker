@@ -354,6 +354,10 @@ footer {
 .io:hover {
   border-color: var(--accent);
 }
+.io.bg-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* visit fields (dates / duration / note) */
 .visit-fields {

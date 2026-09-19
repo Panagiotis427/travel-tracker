@@ -13,5 +13,6 @@ dev-dist/
 # capacitor native projects (generated; rebuilt via `npx cap add`)
 /android/
 /ios/
+*.apk
 # wrangler / cloudflare
 .wrangler/

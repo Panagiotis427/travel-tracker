@@ -11,6 +11,7 @@ import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
 import type { AggMap } from './features/ImportPhotos';
 import type { LabelPoint } from './map/GlobeView';
+import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
 const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
@@ -21,6 +22,7 @@ const LAYERS = { '110m': 'geo/world_110m.topojson', '50m': 'geo/world_50m.topojs
 type Lod = keyof typeof LAYERS;
 const TEX = { dark: 'textures/earth-dark.jpg', day: 'textures/earth-blue-marble.jpg' } as const;
 const OVERVIEW: Pov = { lat: 20, lng: 0, altitude: 2.3 };
+const BG_KEY = 'travel-tracker:bg';
 
 interface CountryMeta { name: string; sov: boolean; }
 
@@ -41,6 +43,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
+  const [bgOn, setBgOn] = useState(false);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
@@ -190,42 +193,75 @@ export default function App() {
     });
   }
 
+  // Classify a coordinate and mark the country (+ region) with today's trip.
+  const markCoords = useCallback(async (lat: number, lng: number) => {
+    await initCountryIndex();
+    const c = classifyCountry(lng, lat);
+    if (!c) return null;
+    const today = isoDate(new Date());
+    const r = await classifyRegion(c.id, lng, lat);
+    setVisits((prev) => {
+      const now = new Date().toISOString();
+      const copy = { ...prev };
+      const changed: VisitMap = {};
+      const mark = (id: string) => {
+        const cur = copy[id];
+        const status: Status = !cur || cur.status === 'want' ? 'visited' : cur.status;
+        const trips = [...(cur?.trips ?? [])];
+        if (!trips.some((t) => t.start === today && t.end === today)) trips.push({ start: today, end: today });
+        const next: Visit = { status, trips, updatedAt: now };
+        copy[id] = next;
+        changed[id] = next;
+      };
+      mark(c.id);
+      if (r) mark(r.id);
+      void putMany(changed);
+      return copy;
+    });
+    return c;
+  }, []);
+
   function markLocation() {
     if (!navigator.geolocation) { setGeoMsg('Geolocation not available here.'); return; }
     setGeoMsg('Locating…');
     navigator.geolocation.getCurrentPosition(
       async (posn) => {
-        const { latitude: lat, longitude: lng } = posn.coords;
-        await initCountryIndex();
-        const c = classifyCountry(lng, lat);
+        const c = await markCoords(posn.coords.latitude, posn.coords.longitude);
         if (!c) { setGeoMsg('No country found at your location.'); return; }
-        const today = isoDate(new Date());
-        const r = await classifyRegion(c.id, lng, lat);
-        setVisits((prev) => {
-          const now = new Date().toISOString();
-          const copy = { ...prev };
-          const changed: VisitMap = {};
-          const mark = (id: string) => {
-            const cur = copy[id];
-            const status: Status = !cur || cur.status === 'want' ? 'visited' : cur.status;
-            const trips = [...(cur?.trips ?? [])];
-            if (!trips.some((t) => t.start === today && t.end === today)) trips.push({ start: today, end: today });
-            const next: Visit = { status, trips, updatedAt: now };
-            copy[id] = next;
-            changed[id] = next;
-          };
-          mark(c.id);
-          if (r) mark(r.id);
-          void putMany(changed);
-          return copy;
-        });
-        setGeoMsg(`Marked ${c.name}${r ? ` · ${r.name}` : ''}.`);
+        setGeoMsg(`Marked ${c.name}.`);
         pick(c.id);
       },
       (err) => setGeoMsg(err.code === err.PERMISSION_DENIED ? 'Location permission denied.' : 'Could not get location.'),
       { enableHighAccuracy: false, timeout: 10_000 },
     );
   }
+
+  // Background tracking (Android app only).
+  async function toggleBg() {
+    if (!isNative()) {
+      window.alert('Background tracking runs in the Android app only. On web/desktop, use "Mark my location".');
+      return;
+    }
+    if (bgOn) {
+      await stopBackground();
+      setBgOn(false);
+      try { localStorage.setItem(BG_KEY, '0'); } catch { /* ignore */ }
+    } else {
+      const ok = await startBackground((la, ln) => { void markCoords(la, ln); });
+      setBgOn(ok);
+      if (ok) try { localStorage.setItem(BG_KEY, '1'); } catch { /* ignore */ }
+    }
+  }
+
+  // Resume background tracking on native if it was on.
+  useEffect(() => {
+    if (!isNative()) return;
+    try {
+      if (localStorage.getItem(BG_KEY) === '1') {
+        startBackground((la, ln) => { void markCoords(la, ln); }).then(setBgOn);
+      }
+    } catch { /* ignore */ }
+  }, [markCoords]);
 
   function exportJson() {
     const data = { app: 'travel-tracker', version: 3, exportedAt: new Date().toISOString(), visits };
@@ -409,6 +445,7 @@ export default function App() {
         <div className="actions">
           <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
           <button className="io" onClick={markLocation}>Mark my location</button>
+          <button className={bgOn ? 'io bg-on' : 'io'} onClick={toggleBg}>Background GPS: {bgOn ? 'On' : 'Off'}</button>
           {geoMsg && <div className="stat-label geo-msg">{geoMsg}</div>}
           <div className="io-row">
             <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>

@@ -18,6 +18,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Persistence (IndexedDB) + JSON export/import | Done |
 | EXIF import (Tier 1): drop photos -> auto-mark countries + regions | Done (web) |
 | PWA: installable + offline (service worker) | Done |
+| Polish: day/night globe, marked-place labels, multiple trips, mark-my-location | Done |
 | Deploy (GitHub Pages / Cloudflare) + Capacitor Android | Ready — see `docs/DEPLOY.md` |
 
 ## Run it

@@ -1,9 +1,10 @@
 // Local-first persistence in IndexedDB (one row per place). All calls are wrapped
 // so the app keeps working in-memory if storage is unavailable (private mode etc.).
-// One-time migration imports the old localStorage status map.
+// Reads normalize legacy shapes; a one-time migration imports the old localStorage map.
 import { openDB } from 'idb';
 import type { IDBPDatabase } from 'idb';
 import type { Status, Visit, VisitMap } from './status';
+import { normalizeVisit } from './status';
 
 const DB_NAME = 'travel-tracker';
 const STORE = 'visits';
@@ -30,7 +31,7 @@ async function migrateFromLocalStorage(d: IDBPDatabase): Promise<VisitMap> {
     const now = new Date().toISOString();
     const tx = d.transaction(STORE, 'readwrite');
     for (const [id, status] of Object.entries(old)) {
-      const v: Visit = { status, updatedAt: now };
+      const v: Visit = { status, trips: [], updatedAt: now };
       map[id] = v;
       await tx.store.put(v, id);
     }
@@ -46,9 +47,12 @@ export async function getAllVisits(): Promise<VisitMap> {
   try {
     const d = await db();
     const keys = await d.getAllKeys(STORE);
-    const vals = (await d.getAll(STORE)) as Visit[];
+    const vals = await d.getAll(STORE);
     const map: VisitMap = {};
-    keys.forEach((k, i) => { map[String(k)] = vals[i]; });
+    keys.forEach((k, i) => {
+      const v = normalizeVisit(vals[i]);
+      if (v) map[String(k)] = v;
+    });
     if (keys.length === 0) return migrateFromLocalStorage(d);
     return map;
   } catch {

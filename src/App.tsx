@@ -2,13 +2,15 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, ChangeEvent } from 'react';
 import { loadFeatures, loadAdmin1, featureName, isSovereign } from './map/geo';
 import type { CountryFeature } from './map/geo';
+import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
 import { focusOf } from './lib/geo-util';
 import type { Pov } from './lib/geo-util';
-import { durationDays, fmtDuration, minIso, maxIso } from './lib/dates';
-import { STATUS_META, UNVISITED_COLOR } from './state/status';
-import type { Status, StatusMap, Visit, VisitMap } from './state/status';
+import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates';
+import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
+import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
 import type { AggMap } from './features/ImportPhotos';
+import type { LabelPoint } from './map/GlobeView';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
 const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
@@ -17,6 +19,7 @@ const COUNTRY_TARGET = 195; // UN members + observers — stable denominator
 const STATUSES: Status[] = ['visited', 'want', 'lived', 'transit'];
 const LAYERS = { '110m': 'geo/world_110m.topojson', '50m': 'geo/world_50m.topojson', '10m': 'geo/world_10m.topojson' } as const;
 type Lod = keyof typeof LAYERS;
+const TEX = { dark: 'textures/earth-dark.jpg', day: 'textures/earth-blue-marble.jpg' } as const;
 const OVERVIEW: Pov = { lat: 20, lng: 0, altitude: 2.3 };
 
 interface CountryMeta { name: string; sov: boolean; }
@@ -25,6 +28,7 @@ export default function App() {
   const [visits, setVisits] = useState<VisitMap>({});
   const [mode, setMode] = useState<'world' | 'country'>('world');
   const [lod, setLod] = useState<Lod>('50m');
+  const [theme, setTheme] = useState<'dark' | 'day'>('dark');
   const [worldFeatures, setWorldFeatures] = useState<CountryFeature[]>([]);
   const [country, setCountry] = useState<{ a3: string; name: string } | null>(null);
   const [regionFeatures, setRegionFeatures] = useState<CountryFeature[]>([]);
@@ -36,10 +40,13 @@ export default function App() {
   const [drillErr, setDrillErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [geoMsg, setGeoMsg] = useState<string | null>(null);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const globeImage = import.meta.env.BASE_URL + TEX[theme];
 
   const mergeMeta = useCallback((feats: CountryFeature[]) => {
     setMeta((prev) => {
@@ -65,7 +72,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto level-of-detail: 50m base, upgrade to 10m when zoomed in (world mode).
   const onZoom = useCallback((altitude: number) => {
     if (mode !== 'world') return;
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
@@ -88,6 +94,18 @@ export default function App() {
     [displayFeatures, selectedId],
   );
 
+  // Labels for marked places (+ the current selection).
+  const labels = useMemo<LabelPoint[]>(() => {
+    const out: LabelPoint[] = [];
+    for (const f of displayFeatures) {
+      if (visits[f.id] || f.id === selectedId) {
+        const p = focusOf(f.geometry);
+        out.push({ lat: p.lat, lng: p.lng, text: featureName(f) });
+      }
+    }
+    return out;
+  }, [displayFeatures, visits, selectedId]);
+
   const pick = useCallback((id: string) => {
     setSelectedId(id);
     setDrillErr(null);
@@ -96,26 +114,29 @@ export default function App() {
   }, [displayFeatures]);
 
   // --- mutations (state + IndexedDB) ---
-  function upsertVisit(id: string, patch: Partial<Visit>) {
+  function setStatus(id: string, status: Status | null) {
+    if (status === null) {
+      setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
+      return;
+    }
     setVisits((prev) => {
-      const prevV = prev[id];
-      const next: Visit = {
-        ...prevV,
-        ...patch,
-        status: patch.status ?? prevV?.status ?? 'visited',
-        updatedAt: new Date().toISOString(),
-      };
+      const next: Visit = { status, trips: prev[id]?.trips ?? [], updatedAt: new Date().toISOString() };
       void putVisit(id, next);
       return { ...prev, [id]: next };
     });
   }
-  function setStatusFor(id: string, status: Status | null) {
-    if (status === null) {
-      setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
-    } else {
-      upsertVisit(id, { status });
-    }
+  function mutateTrips(id: string, fn: (t: Trip[]) => Trip[]) {
+    setVisits((prev) => {
+      const cur = prev[id];
+      const next: Visit = { status: cur?.status ?? 'visited', trips: fn(cur?.trips ?? []), updatedAt: new Date().toISOString() };
+      void putVisit(id, next);
+      return { ...prev, [id]: next };
+    });
   }
+  const addTrip = (id: string) => mutateTrips(id, (t) => [...t, {}]);
+  const updateTrip = (id: string, i: number, patch: Partial<Trip>) =>
+    mutateTrips(id, (t) => t.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const removeTrip = (id: string, i: number) => mutateTrips(id, (t) => t.filter((_, j) => j !== i));
 
   async function drill() {
     if (!selectedFeature) return;
@@ -144,21 +165,11 @@ export default function App() {
     setSelectedId(null);
     setPov({ ...OVERVIEW });
   }
-
-  function resetView() {
-    setSelectedId(null);
-    setPov({ ...OVERVIEW });
-  }
-
+  function resetView() { setSelectedId(null); setPov({ ...OVERVIEW }); }
   function clearAll() {
-    if (window.confirm('Clear all marks? This cannot be undone.')) {
-      setVisits({});
-      void clearVisits();
-    }
+    if (window.confirm('Clear all marks? This cannot be undone.')) { setVisits({}); void clearVisits(); }
   }
 
-  // Merge EXIF-classified places: add where missing, widen date ranges, upgrade
-  // 'want' -> 'visited' (you went), never downgrade an existing status.
   function applyImport(agg: AggMap) {
     setVisits((prev) => {
       const now = new Date().toISOString();
@@ -167,7 +178,10 @@ export default function App() {
       for (const [id, a] of Object.entries(agg)) {
         const cur = copy[id];
         const status: Status = !cur || cur.status === 'want' ? 'visited' : cur.status;
-        const next: Visit = { ...cur, status, start: minIso(cur?.start, a.start), end: maxIso(cur?.end, a.end), updatedAt: now };
+        const trips = [...(cur?.trips ?? [])];
+        if (!trips.length) trips.push({ start: a.start, end: a.end });
+        else trips[0] = { ...trips[0], start: minIso(trips[0].start, a.start), end: maxIso(trips[0].end, a.end) };
+        const next: Visit = { status, trips, updatedAt: now };
         copy[id] = next;
         changed[id] = next;
       }
@@ -176,8 +190,45 @@ export default function App() {
     });
   }
 
+  function markLocation() {
+    if (!navigator.geolocation) { setGeoMsg('Geolocation not available here.'); return; }
+    setGeoMsg('Locating…');
+    navigator.geolocation.getCurrentPosition(
+      async (posn) => {
+        const { latitude: lat, longitude: lng } = posn.coords;
+        await initCountryIndex();
+        const c = classifyCountry(lng, lat);
+        if (!c) { setGeoMsg('No country found at your location.'); return; }
+        const today = isoDate(new Date());
+        const r = await classifyRegion(c.id, lng, lat);
+        setVisits((prev) => {
+          const now = new Date().toISOString();
+          const copy = { ...prev };
+          const changed: VisitMap = {};
+          const mark = (id: string) => {
+            const cur = copy[id];
+            const status: Status = !cur || cur.status === 'want' ? 'visited' : cur.status;
+            const trips = [...(cur?.trips ?? [])];
+            if (!trips.some((t) => t.start === today && t.end === today)) trips.push({ start: today, end: today });
+            const next: Visit = { status, trips, updatedAt: now };
+            copy[id] = next;
+            changed[id] = next;
+          };
+          mark(c.id);
+          if (r) mark(r.id);
+          void putMany(changed);
+          return copy;
+        });
+        setGeoMsg(`Marked ${c.name}${r ? ` · ${r.name}` : ''}.`);
+        pick(c.id);
+      },
+      (err) => setGeoMsg(err.code === err.PERMISSION_DENIED ? 'Location permission denied.' : 'Could not get location.'),
+      { enableHighAccuracy: false, timeout: 10_000 },
+    );
+  }
+
   function exportJson() {
-    const data = { app: 'travel-tracker', version: 2, exportedAt: new Date().toISOString(), visits };
+    const data = { app: 'travel-tracker', version: 3, exportedAt: new Date().toISOString(), visits };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -194,16 +245,18 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(String(reader.result)) as { visits?: VisitMap };
+        const data = JSON.parse(String(reader.result)) as { visits?: Record<string, unknown> };
         const incoming = data.visits ?? {};
         setVisits((prev) => {
           const merged: VisitMap = { ...prev };
-          for (const [id, v] of Object.entries(incoming)) {
-            if (!v || typeof v.status !== 'string') continue;
+          const changed: VisitMap = {};
+          for (const [id, raw] of Object.entries(incoming)) {
+            const v = normalizeVisit(raw);
+            if (!v) continue;
             const cur = merged[id];
-            if (!cur || (v.updatedAt ?? '') > (cur.updatedAt ?? '')) merged[id] = v;
+            if (!cur || (v.updatedAt ?? '') > (cur.updatedAt ?? '')) { merged[id] = v; changed[id] = v; }
           }
-          void putMany(merged);
+          void putMany(changed);
           return merged;
         });
       } catch {
@@ -219,8 +272,7 @@ export default function App() {
     const counts: Record<Status, number> = { visited: 0, want: 0, lived: 0, transit: 0 };
     for (const [id, v] of Object.entries(visits)) {
       counts[v.status]++;
-      const d = durationDays(v.start, v.end);
-      if (d) totalDays += d;
+      for (const t of v.trips) { const d = durationDays(t.start, t.end); if (d) totalDays += d; }
       if (id.includes('-')) { regionsMarked++; continue; }
       const been = v.status === 'visited' || v.status === 'lived';
       if (!been) continue;
@@ -248,7 +300,7 @@ export default function App() {
       ? `${selectedFeature.properties?.type_en ?? 'Region'}${country ? ` · ${country.name}` : ''}`
       : [selectedFeature.properties?.SUBREGION, selectedFeature.properties?.CONTINENT].filter(Boolean)[0] ?? ''
     : '';
-  const durTxt = fmtDuration(durationDays(selVisit?.start, selVisit?.end));
+  const totalDur = selVisit ? fmtDuration(selVisit.trips.reduce((s, t) => s + (durationDays(t.start, t.end) ?? 0), 0)) : '';
   const regionsHere = mode === 'country' ? regionFeatures.filter((f) => visits[f.id]).length : 0;
 
   return (
@@ -305,29 +357,32 @@ export default function App() {
                   key={s}
                   className={selVisit?.status === s ? 'st on' : 'st'}
                   style={{ '--c': STATUS_META[s].color } as CSSProperties}
-                  onClick={() => setStatusFor(selectedId!, s)}
+                  onClick={() => setStatus(selectedId!, s)}
                 >
                   {STATUS_META[s].label}
                 </button>
               ))}
-              <button className="st clear" onClick={() => setStatusFor(selectedId!, null)}>Clear</button>
+              <button className="st clear" onClick={() => setStatus(selectedId!, null)}>Clear</button>
             </div>
 
             {selVisit && (
               <div className="visit-fields">
-                <div className="date-row">
-                  <label>From
-                    <input type="date" value={selVisit.start ?? ''}
-                      onChange={(e) => upsertVisit(selectedId!, { start: e.target.value || undefined })} />
-                  </label>
-                  <label>To
-                    <input type="date" value={selVisit.end ?? ''}
-                      onChange={(e) => upsertVisit(selectedId!, { end: e.target.value || undefined })} />
-                  </label>
-                </div>
-                {durTxt && <div className="dur">{durTxt}</div>}
-                <textarea placeholder="Notes…" value={selVisit.note ?? ''}
-                  onChange={(e) => upsertVisit(selectedId!, { note: e.target.value || undefined })} />
+                {selVisit.trips.map((t, i) => (
+                  <div className="trip" key={i}>
+                    <div className="date-row">
+                      <label>From
+                        <input type="date" value={t.start ?? ''} onChange={(e) => updateTrip(selectedId!, i, { start: e.target.value || undefined })} />
+                      </label>
+                      <label>To
+                        <input type="date" value={t.end ?? ''} onChange={(e) => updateTrip(selectedId!, i, { end: e.target.value || undefined })} />
+                      </label>
+                      <button className="x trip-x" onClick={() => removeTrip(selectedId!, i)} aria-label="Remove trip">×</button>
+                    </div>
+                    <textarea placeholder="Notes…" value={t.note ?? ''} onChange={(e) => updateTrip(selectedId!, i, { note: e.target.value || undefined })} />
+                  </div>
+                ))}
+                <button className="io addtrip" onClick={() => addTrip(selectedId!)}>+ Add trip</button>
+                {totalDur && <div className="dur">{totalDur} total</div>}
               </div>
             )}
 
@@ -353,7 +408,14 @@ export default function App() {
 
         <div className="actions">
           <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
-          <button className="reset" onClick={resetView}>Reset view</button>
+          <button className="io" onClick={markLocation}>Mark my location</button>
+          {geoMsg && <div className="stat-label geo-msg">{geoMsg}</div>}
+          <div className="io-row">
+            <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>
+              {theme === 'dark' ? 'Day globe' : 'Night globe'}
+            </button>
+            <button className="io" onClick={resetView}>Reset view</button>
+          </div>
           <div className="io-row">
             <button className="io" onClick={exportJson}>Export JSON</button>
             <button className="io" onClick={() => fileRef.current?.click()}>Import JSON</button>
@@ -370,6 +432,8 @@ export default function App() {
             polygons={displayFeatures}
             statuses={statuses}
             selectedId={selectedId}
+            globeImage={globeImage}
+            labels={labels}
             onPick={pick}
             onZoom={onZoom}
             pov={pov}

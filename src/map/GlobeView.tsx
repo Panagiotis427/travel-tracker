@@ -7,6 +7,8 @@ import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
 import type { Pov } from '../lib/geo-util';
 
+export interface LabelPoint { lat: number; lng: number; text: string; }
+
 function lighten(hex: string, amt: number): string {
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16);
@@ -20,13 +22,15 @@ interface Props {
   polygons: CountryFeature[];
   statuses: StatusMap;
   selectedId: string | null;
+  globeImage: string;
+  labels?: LabelPoint[];
   onPick: (id: string) => void;
   onHover?: (id: string | null) => void;
   onZoom?: (altitude: number) => void;
   pov?: Pov | null;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, onPick, onHover, onZoom, pov }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, labels, onPick, onHover, onZoom, pov }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const statusesRef = useRef(statuses);
@@ -60,7 +64,7 @@ export default function GlobeView({ polygons, statuses, selectedId, onPick, onHo
     const el = elRef.current!;
     const globe: GlobeInstance = new Globe(el)
       .backgroundColor('#0b1f2a')
-      .globeImageUrl(import.meta.env.BASE_URL + 'textures/earth-dark.jpg')
+      .globeImageUrl(globeImage)
       .showAtmosphere(true)
       .atmosphereColor('#4aa8ff')
       .atmosphereAltitude(0.18)
@@ -80,7 +84,16 @@ export default function GlobeView({ polygons, statuses, selectedId, onPick, onHo
         hoverRef.current = d ? idOf(d) : null;
         cbRef.current.onHover?.(hoverRef.current);
         refresh();
-      });
+      })
+      .labelLat((d: object) => (d as LabelPoint).lat)
+      .labelLng((d: object) => (d as LabelPoint).lng)
+      .labelText((d: object) => (d as LabelPoint).text)
+      .labelSize(1.15)
+      .labelDotRadius(0.22)
+      .labelColor(() => 'rgba(255,255,255,0.92)')
+      .labelResolution(2)
+      .labelAltitude(0.013)
+      .labelsData(labels ?? []);
     globeRef.current = globe;
 
     const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
@@ -107,18 +120,11 @@ export default function GlobeView({ polygons, statuses, selectedId, onPick, onHo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    globeRef.current?.polygonsData(polygons as unknown as object[]);
-  }, [polygons]);
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statuses, selectedId]);
-
-  useEffect(() => {
-    if (pov) globeRef.current?.pointOfView(pov, 800);
-  }, [pov]);
+  useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId]);
+  useEffect(() => { if (pov) globeRef.current?.pointOfView(pov, 800); }, [pov]);
+  useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
+  useEffect(() => { globeRef.current?.labelsData(labels ?? []); }, [labels]);
 
   return <div ref={elRef} className="globe-wrap" />;
 }

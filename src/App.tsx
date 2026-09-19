@@ -4,12 +4,14 @@ import { loadFeatures, loadAdmin1, featureName, isSovereign } from './map/geo';
 import type { CountryFeature } from './map/geo';
 import { focusOf } from './lib/geo-util';
 import type { Pov } from './lib/geo-util';
-import { durationDays, fmtDuration } from './lib/dates';
+import { durationDays, fmtDuration, minIso, maxIso } from './lib/dates';
 import { STATUS_META, UNVISITED_COLOR } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
+import type { AggMap } from './features/ImportPhotos';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
+const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
 
 const COUNTRY_TARGET = 195; // UN members + observers — stable denominator
 const STATUSES: Status[] = ['visited', 'want', 'lived', 'transit'];
@@ -33,6 +35,7 @@ export default function App() {
   const [drilling, setDrilling] = useState(false);
   const [drillErr, setDrillErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showImport, setShowImport] = useState(false);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
@@ -152,6 +155,25 @@ export default function App() {
       setVisits({});
       void clearVisits();
     }
+  }
+
+  // Merge EXIF-classified places: add where missing, widen date ranges, upgrade
+  // 'want' -> 'visited' (you went), never downgrade an existing status.
+  function applyImport(agg: AggMap) {
+    setVisits((prev) => {
+      const now = new Date().toISOString();
+      const copy = { ...prev };
+      const changed: VisitMap = {};
+      for (const [id, a] of Object.entries(agg)) {
+        const cur = copy[id];
+        const status: Status = !cur || cur.status === 'want' ? 'visited' : cur.status;
+        const next: Visit = { ...cur, status, start: minIso(cur?.start, a.start), end: maxIso(cur?.end, a.end), updatedAt: now };
+        copy[id] = next;
+        changed[id] = next;
+      }
+      void putMany(changed);
+      return copy;
+    });
   }
 
   function exportJson() {
@@ -330,10 +352,11 @@ export default function App() {
         </ul>
 
         <div className="actions">
+          <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
           <button className="reset" onClick={resetView}>Reset view</button>
           <div className="io-row">
-            <button className="io" onClick={exportJson}>Export</button>
-            <button className="io" onClick={() => fileRef.current?.click()}>Import</button>
+            <button className="io" onClick={exportJson}>Export JSON</button>
+            <button className="io" onClick={() => fileRef.current?.click()}>Import JSON</button>
           </div>
           <button className="reset" onClick={clearAll}>Clear all marks</button>
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImportFile} />
@@ -353,6 +376,12 @@ export default function App() {
           />
         </Suspense>
       </main>
+
+      {showImport && (
+        <Suspense fallback={null}>
+          <ImportPhotos onClose={() => setShowImport(false)} onApply={applyImport} />
+        </Suspense>
+      )}
     </div>
   );
 }

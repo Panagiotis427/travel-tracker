@@ -16,7 +16,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Search + zoom-to-country, selection panel, status picker | Done |
 | Manual UI (Tier 0): status + dates/duration/note per place | Done |
 | Persistence (IndexedDB) + JSON export/import | Done |
-| EXIF import (Tier 1) | Not started |
+| EXIF import (Tier 1): drop photos -> auto-mark countries + regions | Done (web) |
 
 ## Run it
 

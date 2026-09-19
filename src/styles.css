@@ -337,6 +337,69 @@ footer {
   flex-direction: column;
   gap: 8px;
 }
+.io-row {
+  display: flex;
+  gap: 8px;
+}
+.io {
+  flex: 1;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.io:hover {
+  border-color: var(--accent);
+}
+
+/* visit fields (dates / duration / note) */
+.visit-fields {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.date-row {
+  display: flex;
+  gap: 8px;
+}
+.date-row label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.date-row input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 8px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+.dur {
+  font-size: 12px;
+  color: var(--muted);
+}
+.visit-fields textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 52px;
+  font-family: inherit;
+}
 
 .map-canvas {
   width: 100%;

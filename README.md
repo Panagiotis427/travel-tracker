@@ -14,7 +14,8 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Auto level-of-detail (50m base, 10m on zoom-in) | Done |
 | Admin-1 drill-down (states/provinces per country) | Done |
 | Search + zoom-to-country, selection panel, status picker | Done |
-| Manual UI (Tier 0): dates/duration/note + JSON export/import | Panel + marks done; dates/export next |
+| Manual UI (Tier 0): status + dates/duration/note per place | Done |
+| Persistence (IndexedDB) + JSON export/import | Done |
 | EXIF import (Tier 1) | Not started |
 
 ## Run it

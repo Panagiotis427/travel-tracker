@@ -47,17 +47,13 @@ export default function GlobeView({ polygons, statuses, selectedId, onPick, onHo
     if (id === hoverRef.current) return lighten(base, 0.18);
     return base;
   };
-  const altitude = (d: unknown): number => {
-    const id = idOf(d);
-    if (id === selectedRef.current) return 0.09;
-    if (id === hoverRef.current) return 0.05;
-    return statusesRef.current[id] ? 0.045 : 0.006;
-  };
+  // Countries lie flat on the sphere at a constant tiny altitude: nothing rises,
+  // bobs, or pokes past the globe's edge on hover. Hover/selection = colour only.
   const strokeColor = (d: unknown): string =>
     idOf(d) === selectedRef.current ? '#ffffff' : 'rgba(255,255,255,0.22)';
 
   const refresh = () => {
-    globeRef.current?.polygonCapColor(capColor).polygonAltitude(altitude).polygonStrokeColor(strokeColor);
+    globeRef.current?.polygonCapColor(capColor).polygonStrokeColor(strokeColor);
   };
 
   useEffect(() => {
@@ -68,11 +64,11 @@ export default function GlobeView({ polygons, statuses, selectedId, onPick, onHo
       .showAtmosphere(true)
       .atmosphereColor('#4aa8ff')
       .atmosphereAltitude(0.18)
-      .polygonsTransitionDuration(250)
+      .polygonsTransitionDuration(0)
       .polygonCapColor(capColor)
       .polygonSideColor(() => 'rgba(120,140,155,0.15)')
       .polygonStrokeColor(strokeColor)
-      .polygonAltitude(altitude)
+      .polygonAltitude(0.01)
       .polygonLabel((d: unknown) => {
         const f = d as CountryFeature;
         const st = statusesRef.current[idOf(f)];

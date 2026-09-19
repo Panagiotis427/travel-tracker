@@ -16,11 +16,14 @@ const TMP_DIR = join(HERE, '.tmp');
 const RAW = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson';
 
 const DATASETS = [
-  { id: 'world_110m', src: `${RAW}/ne_110m_admin_0_countries.geojson`, simplify: '18%' },
-  { id: 'world_50m',  src: `${RAW}/ne_50m_admin_0_countries.geojson`,  simplify: '12%' },
+  { id: 'world_110m', src: `${RAW}/ne_110m_admin_0_countries.geojson`, simplify: '18%' }, // overview / far zoom
+  { id: 'world_50m',  src: `${RAW}/ne_50m_admin_0_countries.geojson`,  simplify: '28%' }, // mid zoom (sharper coasts)
+  { id: 'world_10m',  src: `${RAW}/ne_10m_admin_0_countries.geojson`,  simplify: '9%'  }, // near zoom (LOD)
 ];
 
-const KEEP = 'ADM0_A3,NAME,CONTINENT,ISO_A2';
+// TYPE lets the app separate sovereign countries from dependencies/disputed for a
+// stable "% of countries" denominator; POP_EST/REGION_UN/SUBREGION drive stats + search.
+const KEEP = 'ADM0_A3,NAME,CONTINENT,ISO_A2,TYPE,POP_EST,REGION_UN,SUBREGION';
 
 async function fetchToFile(url, dest) {
   process.stdout.write(`  fetch ${url} ... `);

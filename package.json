@@ -12,8 +12,10 @@
     "geo": "npm --prefix tools/geo-pipeline run all && node tools/copy-geo.mjs"
   },
   "dependencies": {
+    "globe.gl": "^2.46.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "three": "^0.186.0",
     "topojson-client": "^3.1.0"
   },
   "devDependencies": {

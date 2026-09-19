@@ -1,49 +1,71 @@
 # travel-tracker
 
-Private, open-source polygon "scratch map" travel tracker. $0 recurring cost. Targets Android, Web, and Windows/desktop from one codebase (iOS deferred).
+Private, open-source "scratch map" travel tracker rendered as a rotatable **3D globe**. $0 recurring cost. React + Vite + TypeScript; web now, Android (Capacitor) and desktop (installable PWA) later. iOS deferred.
 
-Design blueprint: `docs/BLUEPRINT.md` (see also the market/architecture research it derives from).
+Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 
 ## Status
 
 | Part | State |
 | :-- | :-- |
-| Geo data pipeline (Natural Earth -> TopoJSON) | Done |
+| Geo data pipeline (admin-0 110m/50m/10m + admin-1 per country) | Done |
 | Point-in-polygon spatial engine (reference impl + tests) | Done, 10/10 per layer |
-| App shell (framework) | Pending decision (Flutter vs web/TS stack) |
-| Data model + manual UI (Tier 0) | Not started |
+| App shell: React + 3D globe (globe.gl / three.js) | Done |
+| Auto level-of-detail (50m base, 10m on zoom-in) | Done |
+| Admin-1 drill-down (states/provinces per country) | Done |
+| Search + zoom-to-country, selection panel, status picker | Done |
+| Manual UI (Tier 0): dates/duration/note + JSON export/import | Panel + marks done; dates/export next |
 | EXIF import (Tier 1) | Not started |
+
+## Run it
+
+```
+npm install
+npm run dev        # http://localhost:5173
+npm run build      # production build to dist/
+npm run typecheck  # tsc --noEmit
+```
+
+Tap a country to cycle its status (visited -> want -> lived -> clear). Drag to rotate, scroll to zoom. Marks persist in localStorage.
+
+## Rebuild the geo assets
+
+```
+npm run geo        # fetch NE, simplify to TopoJSON, validate PIP, copy to public/geo
+```
+
+Data source: Natural Earth via `nvkelso/natural-earth-vector` (public domain). IDs use `ADM0_A3` (never `iso_a3`, which is `-99` for France/Norway/etc).
 
 ## Repository layout
 
 ```
 travel-tracker/
-  assets/geo/            generated, bundled map geometry (committed)
-    world_110m.topojson  overview layer  (~49 KB)
-    world_50m.topojson   detail layer    (~137 KB)
-  tools/geo-pipeline/    offline build + validation (Node)
-    build-geo.mjs        fetch NE, simplify, emit TopoJSON
-    validate.mjs         ray-cast PIP reference impl + correctness gate
-  docs/
-    BLUEPRINT.md         full architecture plan (v3)
-    spatial-engine.md    PIP algorithm notes + coastal/enclave handling
+  src/
+    App.tsx                main layout + state (statuses, layer, stats)
+    map/
+      GlobeView.tsx        3D globe (globe.gl / three.js) — primary view
+      MapCanvas.tsx        2D equirectangular canvas — alternate view (kept)
+      geo.ts               load TopoJSON -> features / regions
+      pip.ts               ray-cast point-in-polygon (for EXIF/GPS classification)
+      projection.ts        equirectangular forward/inverse (2D view)
+      types.ts
+    state/status.ts        status model, colors, localStorage
+  public/
+    geo/*.topojson         served geometry
+    textures/earth-dark.jpg globe base texture (93 KB, offline)
+  assets/geo/              source of truth for geometry (generated, committed)
+  tools/geo-pipeline/      offline build + validation (Node + Mapshaper)
+  docs/                    BLUEPRINT.md, spatial-engine.md
 ```
 
-## Build the geo assets
+## Rendering choice
 
-```
-cd tools/geo-pipeline
-npm install
-npm run all        # build then validate
-```
+Primary view is a WebGL globe (globe.gl on three.js): dark Earth texture, country
+polygons colored and raised by visit status, atmosphere glow, orbit controls. The
+three.js chunk (~550 KB gz) is code-split so the ~72 KB shell paints immediately.
 
-Data source: Natural Earth via `nvkelso/natural-earth-vector` (public domain).
-IDs use `ADM0_A3` (never `iso_a3`, which is `-99` for France/Norway/etc).
-
-## Spatial engine (validated)
-
-Hand-rolled ray-casting point-in-polygon with a bounding-box prefilter. Handles
-MultiPolygon, interior rings (a point in a hole is outside), exclaves, and the
-antimeridian (Natural Earth pre-splits those polygons). See
-`docs/spatial-engine.md`. The reference implementation lives in
-`tools/geo-pipeline/validate.mjs` and ports directly to Dart or TypeScript.
+**OpenStreetMap** was evaluated and not used: OSM tiles are a 2D Mercator basemap
+that globe.gl cannot drape on a sphere, and a country-level scratch map needs no
+street tiles. If a literal streets-on-globe look is ever wanted, switch the base to
+MapLibre GL (globe projection) with OSM/MapTiler tiles plus a country fill layer.
+See `docs/BLUEPRINT.md` §6.

@@ -1,6 +1,6 @@
-# Travel Tracker Application: Refined $0 Open-Source Blueprint (v3)
+# Travel Tracker Application: Refined $0 Open-Source Blueprint (v3.1)
 
-> Revision of `travel_tracker_app_research_architecture_guide.md`. Goal: a private, open-source polygon "scratch map" travel tracker at zero recurring cost — technical claims corrected, platform trade-offs made honest, hard parts de-risked, and now with a validated $0 multi-user path.
+> Revision of `travel_tracker_app_research_architecture_guide.md`. Goal: a private, open-source "scratch map" travel tracker at zero recurring cost. This revision reflects the locked decisions: React + TypeScript web-first, a 3D WebGL globe (globe.gl / three.js) as the primary view, and a validated $0 multi-user path.
 
 ---
 
@@ -8,32 +8,30 @@
 
 *Append-only. The body below is the single current plan.*
 
+**v3.1 (2026-09-19) — framework + render locked, OSM evaluated**
+- **Framework locked: React + Vite + TypeScript** (not Flutter). Flutter/Dart were not installed and the owner's strong stack is JS/Next.js; React reuses the toolchain and skills, and the point-in-polygon engine is already JavaScript. Android later via Capacitor; desktop as an installable PWA.
+- **Render locked: a 3D WebGL globe** (globe.gl on three.js) — the owner wants a Google-Earth-style rotatable globe, not a flat map. Country polygons are colored by visit status and rise slightly when marked. A 2D equirectangular canvas remains as an optional alternate view.
+- **OpenStreetMap evaluated and not adopted** for the globe (see §6). OSM tiles are a 2D Mercator basemap; only MapLibre-globe or Cesium can drape them on a sphere, and a country-level scratch map does not need street tiles. Natural Earth polygons already beat OSM raw boundaries here.
+- **Milestone 1 complete** (geo pipeline + PIP engine + React globe shell).
+
 **v3 (2026-09-19) — decisions locked + multi-user investigated**
-- **Platforms locked: Android + Web + Windows/desktop. iOS deferred** (removes all Apple signing friction and the $99/yr line — the build is now cleanly $0 on every shipped target).
-- **Ingestion locked as a 3-tier opt-in model:** manual is the always-on baseline; EXIF import and background GPS are optional features the user enables (§8).
-- **New §10: "$0 multi-user / shareable" investigated and confirmed feasible** at hobby/community scale, because this app's heavy work is client-side and its per-user server data is tiny.
+- Platforms: Android + Web + Windows/desktop. iOS deferred.
+- Ingestion: 3-tier opt-in (manual baseline, optional EXIF, optional background GPS).
+- $0 multi-user confirmed feasible at hobby/community scale (§10).
 
 **v2 — corrections vs the original research guide**
-1. "$0 lifetime" → "$0 recurring cloud cost."
-2. "Single codebase = feature parity" corrected — photo scan and background GPS are mobile/desktop-only, never web-automatic.
-3. Background GPS demoted to optional; EXIF is the primary auto-fill.
-4. Android EXIF requires `ACCESS_MEDIA_LOCATION` (scoped storage strips GPS otherwise).
-5. Natural Earth `iso_a3` is `-99` for France/Norway/others — use `ADM0_A3` / `iso_3166_2`.
-6. Equirectangular projection pinned for invertible tap → point-in-polygon.
-7. Geometry bundled as versioned assets; DB holds user data only.
-8. Ray-casting PIP hand-rolled with bbox prefilter (turf_dart = reference only).
-9. Competitor prices flagged unverified.
+- "$0 lifetime" -> "$0 recurring"; single-codebase feature parity corrected; background GPS demoted; Android EXIF needs `ACCESS_MEDIA_LOCATION`; Natural Earth `iso_a3` is `-99` for France/Norway (use `ADM0_A3`); geometry bundled as assets; PIP hand-rolled; competitor prices flagged unverified.
 
 ---
 
 ## 1. Executive Summary
 
-A private, open-source, high-level polygon scratch map (Admin-0 countries and Admin-1 states/provinces) with:
+A private, open-source scratch-map travel tracker with:
 
-- **Core visualization:** interactive vector polygon rendering with multi-state fills (visited / want / lived / transit).
-- **Data layer:** manual entry as the baseline, plus optional automated photo-EXIF import and optional background-GPS geofencing.
-- **Cost:** genuinely $0 recurring on all shipped targets (Android, Web, Desktop) — no Apple fee, no server bill in single-user mode. An optional multi-user cloud sync also stays $0 within free-tier ceilings (§10).
-- **Targets:** Android, Web, and Windows/macOS/Linux desktop from one Flutter codebase. iOS deferred.
+- **Core visualization:** a rotatable 3D WebGL globe; countries are colored by visit status (visited / want / lived / transit) and pop up when marked.
+- **Data layer:** manual entry baseline, plus optional automated photo-EXIF import and optional background-GPS geofencing.
+- **Cost:** genuinely $0 recurring on all shipped targets (Web, Android, desktop). Optional multi-user cloud sync also stays $0 within free-tier ceilings (§10).
+- **Targets:** one React + TypeScript codebase — web now, Android via Capacitor, desktop as an installable PWA. iOS deferred.
 
 ---
 
@@ -41,76 +39,61 @@ A private, open-source, high-level polygon scratch map (Admin-0 countries and Ad
 
 | # | Decision | Locked choice | Rationale |
 | :-- | :-- | :-- | :-- |
-| D1 | Platforms | **Android + Web + Windows/desktop** (iOS deferred) | Every target is $0; no Apple signing tax |
-| D2 | Ingestion | **Manual baseline + optional EXIF + optional background GPS** | Progressive; users opt into permissions |
-| D3 | Data granularity | **Admin-0 world + on-demand Admin-1** | Full Admin-1 bundled is >150 MB; lazy-load |
-| D4 | Sharing | **Local-only default; optional $0 cloud sync/share** | Ship single-user first; multi-user is proven-feasible (§10) |
+| D1 | Framework | **React + Vite + TypeScript** | Installed toolchain + owner's stack; PIP already JS |
+| D2 | Render | **3D WebGL globe (globe.gl / three.js)** | Owner wants a Google-Earth-style globe |
+| D3 | Platforms | **Web + Android (Capacitor) + desktop PWA** (iOS deferred) | Every target is $0 |
+| D4 | Ingestion | **Manual baseline + optional EXIF + optional background GPS** | Progressive permission model |
+| D5 | Data granularity | **Admin-0 world + on-demand Admin-1** | Full Admin-1 bundled is >150 MB |
+| D6 | Sharing | **Local-only default; optional $0 cloud sync/share** | Ship single-user first (§10) |
 
 ---
 
 ## 3. Platform Capability Matrix
 
-| Capability | Android | Web | Windows / desktop |
+| Capability | Web | Android (Capacitor) | Windows / desktop |
 | :-- | :--: | :--: | :--: |
-| Polygon map render + manual edit | Yes | Yes | Yes |
-| Local persistence | SQLite | IndexedDB | SQLite |
-| EXIF import | Library scan* | Photo upload / drag-drop** | Folder scan*** |
-| Background GPS geofence | Optional**** | No | No |
-| $0 install / distribution | APK sideload | Free static host | Run locally |
+| 3D globe render + manual edit | Yes | Yes | Yes (PWA) |
+| Local persistence | IndexedDB | SQLite | IndexedDB (PWA) |
+| EXIF import | Photo upload / drag-drop* | Library scan** | Folder scan / upload |
+| Background GPS geofence | No | Optional*** | No |
+| $0 install / distribution | Free static host | APK sideload | Installable PWA |
 
-\* Android needs `ACCESS_MEDIA_LOCATION` or GPS is redacted from EXIF.
-\** Web cannot enumerate a camera roll, but the user can select or drag-drop photos and the app parses EXIF client-side (browser File API), with zero upload to any server.
-\*** Desktop has no camera-roll API; scan a user-picked folder of image files.
-\**** Android background location needs `ACCESS_BACKGROUND_LOCATION`; use DIY significant-change to avoid the paid plugin (§8).
+\* Web parses EXIF client-side (File API + a JS EXIF reader); nothing is uploaded.
+\** Android needs `ACCESS_MEDIA_LOCATION` (via a Capacitor plugin) or GPS is redacted.
+\*** Android background location needs `ACCESS_BACKGROUND_LOCATION`; use a DIY significant-change approach to avoid a paid plugin (§8).
 
-> iOS deferred. If revived later: free Apple-ID signing expires every 7 days (3-app cap); a frictionless install costs $99/yr. Same codebase, so it is an add-on, not a rewrite.
+> iOS deferred. Same React/Capacitor codebase, so it is an add-on later (free 7-day resign or $99/yr).
 
 ---
 
 ## 4. Market Analysis (condensed)
 
-Three archetypes:
-
-1. **Polygon scratch maps** (*Been*, *Visited*, *Mark O'Travel*) — geopolitical completeness, percentage metrics, clean vector look. Our target.
-2. **Timeline / route planners** (*Polarsteps*, *Wanderlog*, *FindPenguins*) — GPS lines, journals, social feeds.
-3. **Fog-of-war mappers** (*Fog of World*, *World Uncovered*) — continuous high-resolution tile discovery.
-
-### Competitor comparison (prices unverified — confirm before public use)
-
-| App | UX paradigm | Admin-1 | Temporal | Auto ingestion | Pricing |
-| :-- | :-- | :-- | :-- | :-- | :-- |
-| Been | 2D/3D polygon scratch | Limited (IAP) | Basic toggle | None | Freemium |
-| Visited | Polygon + bucket lists | Extensive | Dates + checklists | None | Aggressive freemium |
-| Mark O'Travel | Vector polygon | Per-region download | Arrival/departure | None | Paid/freemium |
-| Polarsteps | GPS path + journal | No | Rich timeline | Continuous GPS | Free (sells books) |
-| Google Maps Timeline | Points/path history | No | Automated | Passive location | Free (Google account) |
-| Wanderlog | Itinerary + route | No | Itinerary dates | Email sync | Freemium |
-
-**Takeaway:** no commercial standalone polygon scratch map is 100% free without locking Admin-1 regions, multi-status categories, or export. That gap is what this build fills — and the client-side, zero-telemetry design is a genuine privacy differentiator.
+Three archetypes: **polygon scratch maps** (Been, Visited, Mark O'Travel — our target), **timeline/route planners** (Polarsteps, Wanderlog), **fog-of-war mappers** (Fog of World). No commercial standalone scratch map is 100% free without locking sub-regions, multi-status categories, or export. Client-side, zero-telemetry processing is our privacy differentiator. (Competitor prices from the original research are unverified — confirm before public use.)
 
 ---
 
 ## 5. Technology Stack
 
-**Framework: Flutter (Dart)** — one canvas abstraction across Android/Web/Desktop, Skia/Impeller renders complex vector geometry directly with no bridge. Right call for a canvas-heavy vector app.
+**Framework: React + Vite + TypeScript.** Reuses the owner's existing web toolchain (Node already installed) and skills; the validated point-in-polygon engine is already JavaScript and drops straight in.
 
 ```text
 +---------------------------------------------------------------------------+
-|                             CLIENT (Flutter 3.x)                          |
+|                        CLIENT (React + Vite + TS)                         |
 |                                                                           |
-|  Targets:  Android | Web (CanvasKit / Wasm) | Windows·macOS·Linux         |
+|  Targets:  Web (now) | Android (Capacitor) | Desktop (installable PWA)     |
 |                                                                           |
-|  UI / Map:                                                                |
-|   • Strategy A (default): CustomPainter, GeoJSON->Path, equirectangular   |
-|   • Strategy B (optional): flutter_map + PolygonLayer for slippy zoom     |
+|  Render:                                                                  |
+|   • Primary: 3D WebGL globe — globe.gl on three.js                        |
+|       dark Earth texture + country polygons colored by status,            |
+|       altitude pop when marked, atmosphere glow, orbit controls           |
+|   • Alternate: 2D equirectangular <canvas> (kept, not default)            |
+|   • Lazy-split so the shell paints instantly while three.js streams       |
 |                                                                           |
-|  Processing (Dart Isolate / Web Worker):                                  |
-|   • Spatial: hand-rolled ray-cast PIP + bbox prefilter                    |
-|   • EXIF: photo_manager (Android) / file picker (desktop) / File API (web)|
-|   • Location (optional): DIY significant-change (Android)                 |
+|  Spatial (for ingestion): hand-rolled ray-cast PIP + bbox prefilter       |
+|       (classifies EXIF/GPS lat-lng -> country; globe clicks use the lib)  |
 |                                                                           |
-|  State: Riverpod                                                          |
-|  Persistence (user data only): drift -> SQLite (native) / IndexedDB (web) |
+|  State: React hooks (upgrade to a store if needed)                        |
+|  Persistence (user data only): localStorage now -> IndexedDB / wa-sqlite  |
 |  Geometry: bundled versioned TopoJSON assets loaded to memory            |
 +---------------------------------------------------------------------------+
                                     |
@@ -123,30 +106,40 @@ Three archetypes:
 +---------------------------------------------------------------------------+
 ```
 
-**Web caveats:** CanvasKit adds a ~2 MB first-load payload; the Wasm-GC build targets modern browsers only. Fine for this use.
+**Bundle note:** three.js makes the globe chunk ~550 KB gzipped. It is code-split (React.lazy) so the ~72 KB shell renders immediately and the globe streams in behind a loader.
 
-**Desktop:** same code as a Windows/macOS/Linux app; on desktop, EXIF comes from a user-picked folder scan.
+**Desktop:** the web build installs as a PWA on Windows/macOS/Linux; EXIF there comes from a picked folder or file upload.
 
 ---
 
-## 6. Spatial Engine (the polygon core)
+## 6. Rendering & Spatial Engine
 
-### Rendering — Strategy A (recommended, the "Been" look)
+### Primary view — 3D globe (globe.gl / three.js)
 
-- Parse coordinates into Flutter `Path` objects with **equirectangular** mapping (`x = (lon+180)/360·W`, `y = (90−lat)/180·H`). Linear and invertible.
-- Cache each region's `Path` and a pre-recorded `Picture` for the static base; repaint only re-fills changed regions. Wrap in `RepaintBoundary`.
-- Pan/zoom via a transform matrix. On tap: inverse-transform to lon/lat → bbox-filter candidates → ray-cast PIP on survivors.
-- Status fills: `#3498db` visited, `#e67e22` want, `#2ecc71` lived, `#ecf0f1` unvisited.
+- A dark Earth texture (93 KB, bundled, offline, no API key) on a sphere with a blue atmosphere.
+- Country polygons from Natural Earth are fed to `polygonsData`; `polygonCapColor` maps each to its status color (or muted slate when unvisited), and `polygonAltitude` raises marked countries for a 3D pop.
+- Interaction: drag to rotate, scroll to zoom, hover for a label, click to cycle status. Hit-testing is handled by the library, so tap detection needs no manual math.
+- Gentle auto-rotate until the first interaction.
 
-### Point-in-polygon
+### Alternate view — 2D equirectangular canvas (kept)
 
-- Ray-casting per region over `{id, bbox, MultiPolygon}`: reject by bbox first, then cast. Handle **MultiPolygon**, **interior rings** (lakes/enclaves), and the **antimeridian** (normalize longitudes for Russia/Fiji/Aleutians).
-- Bbox linear prefilter suffices for ~250 countries and ~4,000 Admin-1 units; add a grid/R-tree only if profiling demands.
+- Linear, invertible projection (`x=(lon+180)/360·W`, `y=(90−lat)/180·H`) with pan/zoom and tap→lon/lat→PIP. Retained as a lightweight flat option; not the default.
 
-### Correctness tests
+### Point-in-polygon (now for ingestion)
 
-- Known coordinates resolve correctly (Eiffel Tower → FRA/Île-de-France; a Lesotho point is not South Africa; Kaliningrad → RUS).
-- Golden-image tests for the base render.
+- The validated ray-caster (bbox prefilter, MultiPolygon, holes, antimeridian) classifies EXIF/GPS coordinates to a country. It is no longer needed for globe clicks but is essential for automated ingestion. Reference + tests: `tools/geo-pipeline/validate.mjs` (10/10 per layer); app copy: `src/map/pip.ts`.
+- Known limits: the 110m layer cannot resolve tiny enclaves; coastal points can fall in water after simplification — classify ingestion points against a finer layer or add a nearest-border tolerance fallback.
+
+### Does OpenStreetMap help? (investigated)
+
+Short answer: **not for this globe.** Detail:
+
+- **OSM tiles are a 2D Web-Mercator basemap** (streets, labels). globe.gl/three consume a single full-globe texture, not slippy tiles, so OSM tiles do not plug in. Only **MapLibre GL** (globe projection) or **CesiumJS** can drape map tiles on a sphere.
+- **A country-level scratch map does not need street tiles.** The value of OSM (streets, POIs) is wasted at country granularity.
+- **OSM raw boundaries are redundant here.** Natural Earth is already public-domain, cleaner, and generalized for exactly this use; OSM boundaries are heavier and need processing.
+- **Tile-usage asterisk:** OSM's public tile servers forbid heavy/bulk use; a real app would need a provider (MapTiler free tier needs an API key) or self-hosting — friction against "$0, no account."
+
+**When OSM would help:** only if the product later wants a literal "Google-Maps-with-streets, draped on a 3D globe" look. Then switch the base to **MapLibre GL with globe projection**, use OSM (or MapTiler) tiles as the basemap, and add a country **fill layer** with feature-state coloring and click handlers for the scratch mechanic. That is the documented alternative, carrying the tile-provider asterisk. For now, the globe.gl vector globe is fully $0, offline, and key-free.
 
 ---
 
@@ -154,146 +147,55 @@ Three archetypes:
 
 Raw global Admin-1 GeoJSON is >150 MB, so pre-process offline and bundle the result.
 
-**Sources (public domain):** `ne_110m_admin_0_countries` (~200 KB, overview); `ne_50m_admin_0_countries` (detail); `ne_10m_admin_1_states_provinces` (Admin-1, split per country, on demand).
-
-**Pipeline (committed build scripts):**
-1. Simplify with **Mapshaper** (Visvalingam-Whyatt): `mapshaper in.shp -simplify 8% keep-shapes -o format=topojson out.json`.
-2. Convert to **TopoJSON** to drop shared vertices (70–80% smaller).
-3. Split Admin-1 per country; load lazily on drill-down.
-4. **IDs:** Admin-0 = `ADM0_A3` (never `iso_a3`, which is `-99` for France/Norway/etc.). Admin-1 = `iso_3166_2`, fallback `adm1_code`; patch blanks manually.
+- **Sources (public domain):** `ne_110m_admin_0_countries` (overview), `ne_50m_admin_0_countries` (detail), `ne_10m_admin_1_states_provinces` (Admin-1, on demand).
+- **Pipeline (`tools/geo-pipeline`, Node + Mapshaper):** simplify (Visvalingam-Whyatt) -> TopoJSON (70–80% smaller) -> split Admin-1 per country. IDs use `ADM0_A3` (never `iso_a3`); Admin-1 `iso_3166_2` fallback `adm1_code`.
+- Result today: `world_110m.topojson` ~49 KB, `world_50m.topojson` ~137 KB, bundled in `assets/geo` and served from `public/geo`.
 
 ---
 
 ## 8. Automated Ingestion — Tiered Opt-In Model
 
-The end user gets manual control by default and opts into automation per feature. Permissions are requested only when a tier is enabled (progressive disclosure), never on first launch.
+Permissions are requested only when a tier is enabled, never on first launch.
 
-```text
-  TIER 0  Manual            always on · all platforms · no permissions
-     |
-  TIER 1  EXIF import       opt-in · Android(library) / Desktop(folder) / Web(upload)
-     |                      100% on-device, zero upload
-  TIER 2  Background GPS    opt-in · advanced/experimental · Android only
-                            DIY significant-change to stay $0
-```
+- **Tier 0 — Manual (baseline).** Tap a country to cycle status; set dates/note. All platforms, no permissions.
+- **Tier 1 — EXIF import (recommended opt-in).** Web: user selects/drag-drops photos, parsed client-side (File API + a JS EXIF reader), zero upload. Android (Capacitor): media-library scan with `ACCESS_MEDIA_LOCATION`. Desktop: picked folder / file upload. Pipeline: read lat/lng + `DateTimeOriginal` -> PIP -> upsert visit + store the raw point as evidence -> dedup per region per day. Privacy is the selling point: all on-device.
+- **Tier 2 — Background GPS (optional, experimental, Android).** DIY significant-change (Capacitor geolocation + `ACCESS_BACKGROUND_LOCATION`) to avoid a paid plugin; fix once on wake, PIP, store, release. Label experimental.
 
-### Tier 0 — Manual (baseline)
-Tap a region, set status, dates, note. Works everywhere, no permissions, no risk. The product's floor.
-
-### Tier 1 — EXIF import (recommended optional flagship)
-- **Android:** `photo_manager` library scan; request read access **and** `ACCESS_MEDIA_LOCATION`.
-- **Desktop:** user picks a folder; scan image files for EXIF.
-- **Web:** user selects or drag-drops photos; parse EXIF in-browser via the File API — nothing is uploaded.
-- Pipeline: page assets on an Isolate → read `latitude`/`longitude`/`DateTimeOriginal` → discard no-GPS → ray-cast PIP → upsert visit + store the raw point as evidence → dedup to one visit per region per day.
-- Privacy is the selling point: all parsing is on-device, no telemetry.
-
-### Tier 2 — Background GPS (optional, advanced, Android)
-- DIY significant-change (Fused passive + activity recognition + `ACCESS_BACKGROUND_LOCATION`) to avoid the paid `flutter_background_geolocation` Android license and keep the developer at $0.
-- On wake: single fix → PIP → store → release location hardware. Label it experimental in the UI.
-
-**My recommendation (you asked):** your instinct is right. Manual as the mandatory floor, EXIF as the strongly-recommended opt-in, background GPS as a clearly-labeled experimental extra. EXIF is the sweet spot — deterministic, one-time permission, no battery cost, and it delivers most of the "auto-fill where I've been" value. Background GPS earns its place last: it is the only tier with ongoing battery/permission cost, the only one that could force a plugin fee, and the only one Play Store scrutinizes. Ship 0 and 1; treat 2 as a stretch.
+Recommendation: ship Tiers 0 and 1; treat Tier 2 as a stretch.
 
 ---
 
 ## 9. Data Model (local-first)
 
-Geometry lives in bundled assets; the database holds **user data only** — tiny, and therefore cheap to sync or share.
+Geometry lives in bundled assets; the database holds **user data only** — tiny, and cheap to sync or share.
 
-```text
-Table: regions        (populated once from bundled geo; names + stats)
-  id  TEXT PK          -- ADM0_A3 (country) or ISO 3166-2 (admin-1)
-  parent_id  TEXT NULL -- country ADM0_A3 for admin-1
-  name  TEXT
-  admin_level  INTEGER -- 0 country, 1 state/province
-  continent  TEXT
-  iso_a2  TEXT NULL
+- **regions** (from bundled geo): `id` (ADM0_A3 / ISO 3166-2), `parent_id`, `name`, `admin_level`, `continent`, `iso_a2`.
+- **visit_records:** `id` (uuid), `region_id`, `status` (visited|want|lived|transit), `start_date`, `end_date`, `source` (manual|exif|gps), `note`, `created_at`, `updated_at` (LWW merge key).
+- **evidence:** raw geotagged points (`lat`, `lng`, `taken_at`, `source`, `asset_ref`) to re-derive visits.
+- **app_meta:** `schema_version`, `geo_data_version`.
 
-Table: visit_records
-  id  TEXT PK          -- uuid
-  region_id  TEXT FK -> regions(id)
-  status  TEXT         -- 'visited'|'want'|'lived'|'transit' (extensible)
-  start_date  TEXT NULL
-  end_date  TEXT NULL
-  source  TEXT         -- 'manual'|'exif'|'gps'
-  note  TEXT NULL
-  created_at  TEXT
-  updated_at  TEXT     -- last-write-wins key for merge
-
-Table: evidence        (raw geotagged points; re-derive visits)
-  id  TEXT PK
-  region_id  TEXT FK
-  visit_id  TEXT NULL FK
-  lat  REAL
-  lng  REAL
-  taken_at  TEXT
-  source  TEXT
-  asset_ref  TEXT NULL  -- local photo id, NOT the bytes
-
-Table: app_meta
-  schema_version  INTEGER
-  geo_data_version  TEXT
-
-Indices: visit_records(region_id), (status), (start_date)
-```
-
-Multiple visits per region allowed. Stats derive from these: % of world, % per continent, total days, count by status. **Export/import:** the dataset serializes to one JSON file; import merges by `id` with last-write-wins on `updated_at`.
+Now = `localStorage` (`travel-tracker:statuses:v1`); next = IndexedDB (via `idb`) or `wa-sqlite`. Export/import = one JSON file; import merges by `id` with last-write-wins.
 
 ---
 
 ## 10. Sharing & Multi-User at $0 (investigated)
 
-**You asked whether shareable / multi-user is possible at $0. Yes — for this app specifically, and at hobby-to-community scale.** The reason is structural: the expensive parts (map geometry, rendering, point-in-polygon, EXIF parsing) all run on the client, and the map geometry ships inside the app rather than being served per request. So a backend only ever moves each user's tiny text payload (a few thousand JSON rows). Storage, bandwidth, and compute per user are near-zero, which is exactly what free tiers are generous about.
+**Feasible at hobby-to-community scale**, because the heavy work (geometry, render, PIP, EXIF) is client-side and the map geometry ships in the app, so a backend only moves each user's tiny text payload.
 
-### Free-tier building blocks
-
-| Service | Free ceiling (approx.) | Watch-out |
-| :-- | :-- | :-- |
-| **Supabase** | Postgres 500 MB, 5 GB egress/mo, 50k monthly active users, auth + row-level security + realtime | Free projects pause after ~1 week idle (a non-issue once real users keep it active) |
-| **Firebase (Spark)** | Firestore 1 GB, ~50k reads / 20k writes per day, auth free, 10 GB/mo hosting | Daily quotas are the wall; no pause |
-| **Cloudflare** | Pages (unlimited static bandwidth), Workers 100k req/day, D1 SQLite ~5 GB, **R2 storage with zero egress fees** | No built-in auth (add via Workers); best economics |
-| **Turso (libSQL)** | ~9 GB storage, ~1B row-reads/mo, 25M writes/mo | SQLite semantics |
-| **Neon (Postgres)** | ~0.5 GB, scales to zero | You already use this on another project |
-
-### Recommended $0 multi-user stack (when you want it)
-- **Easiest:** Supabase — Postgres + auth + row-level security + realtime in one, 50k MAU free. Lowest wiring effort.
-- **Best economics / commercial-OK:** Cloudflare Workers + D1 for data, **R2 for any shared media (zero egress fees)**, Pages for the web client.
-
-### Sharing models, cheapest first
-1. **Private per-user cloud sync** — each user's rows row-level-secured. Cheap: tiny text sync.
-2. **Public read-only share links** — publish a static JSON or a rendered map snapshot to the static host / R2. The cheapest possible sharing: no live backend load per view.
-3. **Social / following / feeds** — most expensive (N-to-N reads). Defer; this is what burns free-tier quotas first.
-
-### The three honest asterisks
-1. **"$0" means "$0 within free-tier ceilings,"** not at infinite scale. At hundreds-to-low-thousands of users you stay free; a viral spike breaks it — a good problem you would monetize by then.
-2. **Egress is the first wall.** Mitigate by keeping payloads tiny (this app already does) and putting any shared media on Cloudflare R2 (no egress fees).
-3. **Some free hosts forbid commercial use** (e.g. Vercel Hobby is non-commercial). If you ever monetize, host on Cloudflare (commercial-OK on free) or self-host.
-
-**Bottom line:** ship single-user local-first first. Multi-user sync and public share links are a proven, low-cost add-on for this app; social features are the only thing that meaningfully threatens $0, so gate them behind demand.
+- **Free-tier options:** Supabase (Postgres 500 MB, 5 GB egress/mo, 50k MAU, auth + RLS + realtime; free projects pause after ~1 week idle), Firebase (Firestore ~50k reads/day), Cloudflare (Workers 100k req/day, D1 ~5 GB, **R2 zero egress fees**), Turso, Neon.
+- **Recommended:** Supabase (easiest) or Cloudflare (best economics, commercial-OK). Media on R2 (no egress fees).
+- **Sharing, cheapest first:** private per-user sync -> public read-only snapshot links (no live backend load) -> social feeds (defer; burns quotas first).
+- **Three asterisks:** "$0" means within free-tier ceilings; egress is the first wall (mitigated by tiny payloads + R2); some free hosts ban commercial use (Vercel Hobby) — use Cloudflare if monetizing.
 
 ---
 
-## 11. Roadmap (tiered, with acceptance criteria)
+## 11. Roadmap
 
-**Milestone 1 — Spatial engine & canvas**
-- Offline scripts download + simplify Natural Earth 110m/50m; TopoJSON in repo.
-- Dart TopoJSON unpacker + ray-cast PIP (bbox prefilter, MultiPolygon/holes/antimeridian).
-- CustomPainter map: pan/zoom, tap-to-select, multi-color fills.
-- *Done when:* tapping any country selects the correct one at 60 fps on a mid device; PIP unit tests pass.
-
-**Milestone 2 — Data model & manual UI (Tier 0)**
-- drift schema + Riverpod; region inspector (status/dates/duration/note); stats dashboard; JSON export/import.
-- *Done when:* a visit survives restart; export→import round-trips losslessly.
-
-**Milestone 3 — EXIF import (Tier 1)**
-- Android library scan (+`ACCESS_MEDIA_LOCATION`), desktop folder scan, web upload — client-side parse, Isolate batching, evidence rows, dedup.
-- *Done when:* a geotagged photo set auto-populates the right regions with no UI jank.
-
-**Milestone 4 — Multi-platform build & $0 distribution**
-- Flutter Web (CanvasKit/Wasm) to Cloudflare Pages; signed Android APK; desktop build.
-- *Done when:* all three targets run the same feature set (minus platform-limited ingestion).
-
-**Optional Milestone 5 — Background GPS (Tier 2, Android).**
-**Optional Milestone 6 — $0 cloud sync + public share links** (Supabase or Cloudflare; §10).
+- **Milestone 1 — DONE.** Geo pipeline (NE -> TopoJSON), PIP engine (10/10 per layer), React + 3D globe shell (rotate/zoom/tap-to-cycle, live stats, localStorage).
+- **Milestone 2 — Data model & manual UI.** Region inspector (status/dates/duration/note), stats dashboard, JSON export/import, IndexedDB persistence.
+- **Milestone 3 — EXIF import (Tier 1).** Web upload + client-side parse first; Android via Capacitor later.
+- **Milestone 4 — Packaging.** Web to Cloudflare Pages; Android via Capacitor (needs Android SDK); desktop PWA.
+- **Optional M5** background GPS; **Optional M6** $0 cloud sync + public share links.
 
 ---
 
@@ -301,24 +203,20 @@ Multiple visits per region allowed. Stats derive from these: % of world, % per c
 
 | Risk | Likelihood | Impact | Mitigation |
 | :-- | :-- | :-- | :-- |
-| Background GPS unreliable / plugin cost | High | Medium | Optional Tier 2; DIY significant-change; lead with EXIF |
-| Android GPS redacted from EXIF | Medium | High | Request `ACCESS_MEDIA_LOCATION` |
-| NE code fields wrong/blank (`iso_a3=-99`) | High | Medium | Use `ADM0_A3` / `iso_3166_2`; patch blanks |
-| Antimeridian polygons mis-render/mis-PIP | Medium | Medium | Normalize longitudes; test Russia/Fiji |
-| Web bundle heavy | Low | Low | Accept CanvasKit payload; lazy-load Admin-1 |
-| Multi-user egress/quota overrun | Low (hobby) | Medium | Tiny payloads + R2; gate social features |
-| Free host commercial-use ToS | Low | Medium | Cloudflare (commercial-OK) if monetizing |
+| three.js bundle weight (~550 KB gz) | Certain | Low | Code-split (done); shell 72 KB gz |
+| Background GPS unreliable / plugin cost | High | Medium | Optional Tier 2; DIY significant-change |
+| Android GPS redacted from EXIF | Medium | High | `ACCESS_MEDIA_LOCATION` |
+| NE code fields wrong (`iso_a3=-99`) | High | Medium | Use `ADM0_A3` / `iso_3166_2` |
+| Coastal/enclave PIP misses after simplify | Medium | Medium | Finer layer + nearest-border fallback |
+| Multi-user egress/quota overrun | Low (hobby) | Medium | Tiny payloads + R2; gate social |
 
 ---
 
 ## 13. References
 
-1. **Natural Earth** — public-domain vector data at 1:10m/50m/110m. naturalearthdata.com
-2. **Shimrat, M. (1962)** — *Algorithm 112: Position of point relative to polygon.* CACM 5(8), 434.
-3. **Visvalingam, M. & Whyatt, J. D. (1993)** — *Line generalisation by repeated elimination of the smallest area.* The Cartographic Journal 30(1), 46–51.
-4. **Bostock, M.** — *TopoJSON Specification.* github.com/topojson/topojson-specification
-5. **Mapshaper** — CLI + web GIS simplification. mapshaper.org
-6. **OpenStreetMap** — ISO 3166 administrative boundaries. wiki.openstreetmap.org
-7. **Flutter** — cross-platform graphics (Impeller). docs.flutter.dev
-8. **drift** — reactive local-first SQLite for Dart/Flutter. drift.simonbinder.eu
-9. **Supabase / Cloudflare / Firebase / Turso / Neon** — free-tier BaaS and edge platforms (§10).
+1. **Natural Earth** — public-domain vector data. naturalearthdata.com (via `nvkelso/natural-earth-vector`).
+2. **globe.gl / three-globe / three.js** — WebGL globe with polygon layers. github.com/vasturiano/globe.gl
+3. **MapLibre GL JS** — open-source map renderer with a **globe projection** (the OSM-on-globe alternative). maplibre.org
+4. **Mapshaper** — simplification (Visvalingam-Whyatt) + TopoJSON. mapshaper.org
+5. **Shimrat (1962)**, **Visvalingam & Whyatt (1993)**, **Bostock (TopoJSON spec)** — PIP + generalization + topology.
+6. **Supabase / Cloudflare / Firebase / Turso / Neon** — free-tier BaaS/edge (§10).

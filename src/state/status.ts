@@ -8,7 +8,8 @@ export const STATUS_META: Record<Status, { label: string; color: string }> = {
   transit: { label: 'Transit', color: '#9b59b6' },
 };
 
-export const UNVISITED_COLOR = '#e7ecf0';
+// Muted slate for unvisited land — reads well on the dark globe and in the legend.
+export const UNVISITED_COLOR = '#5b7284';
 
 // Tap cycles through these; null clears the mark.
 const CYCLE: (Status | null)[] = ['visited', 'want', 'lived', null];

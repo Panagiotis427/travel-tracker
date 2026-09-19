@@ -7,8 +7,6 @@ import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
 import type { Pov } from '../lib/geo-util';
 
-export interface LabelPoint { lat: number; lng: number; text: string; }
-
 function lighten(hex: string, amt: number): string {
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16);
@@ -23,8 +21,8 @@ interface Props {
   statuses: StatusMap;
   selectedId: string | null;
   globeImage: string;
-  labels?: LabelPoint[];
   onPick: (id: string) => void;
+  onDeselect?: () => void;
   onHover?: (id: string | null) => void;
   onZoom?: (pov: Pov) => void;
   pov?: Pov | null;
@@ -32,18 +30,18 @@ interface Props {
   colorOverride?: (id: string) => string | null;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, labels, onPick, onHover, onZoom, pov, colorOverride }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
   const coRef = useRef(colorOverride);
-  const cbRef = useRef({ onPick, onHover, onZoom });
+  const cbRef = useRef({ onPick, onDeselect, onHover, onZoom });
   statusesRef.current = statuses;
   selectedRef.current = selectedId;
   coRef.current = colorOverride;
-  cbRef.current = { onPick, onHover, onZoom };
+  cbRef.current = { onPick, onDeselect, onHover, onZoom };
 
   const idOf = (d: unknown) => String((d as CountryFeature).id);
 
@@ -92,18 +90,11 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))
       .onPolygonHover((d: unknown) => {
         hoverRef.current = d ? idOf(d) : null;
+        el.style.cursor = d ? 'pointer' : 'grab';
         cbRef.current.onHover?.(hoverRef.current);
         refresh();
       })
-      .labelLat((d: object) => (d as LabelPoint).lat)
-      .labelLng((d: object) => (d as LabelPoint).lng)
-      .labelText((d: object) => (d as LabelPoint).text)
-      .labelSize(1.0)
-      .labelDotRadius(0)
-      .labelColor(() => 'rgba(255,255,255,0.9)')
-      .labelResolution(2)
-      .labelAltitude(0.002)
-      .labelsData(labels ?? []);
+      .onGlobeClick(() => cbRef.current.onDeselect?.());
     globeRef.current = globe;
 
     const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
@@ -134,7 +125,6 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
   useEffect(() => { if (pov) globeRef.current?.pointOfView(pov, 800); }, [pov]);
   useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
-  useEffect(() => { globeRef.current?.labelsData(labels ?? []); }, [labels]);
 
   return <div ref={elRef} className="globe-wrap" />;
 }

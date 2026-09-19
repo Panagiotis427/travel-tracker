@@ -11,7 +11,6 @@ import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
 import type { AggMap } from './features/ImportPhotos';
-import type { LabelPoint } from './map/GlobeView';
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
@@ -173,14 +172,6 @@ export default function App() {
   }, [displayFeatures, worldFeatures, regions1, regions2]);
 
   const selectedFeature = useMemo(() => (selectedId ? featureById(selectedId) : null), [selectedId, featureById]);
-
-  const labels = useMemo<LabelPoint[]>(() => {
-    const out: LabelPoint[] = [];
-    for (const f of displayFeatures) {
-      if (visits[f.id]) { const pt = focusOf(f.geometry); out.push({ lat: pt.lat, lng: pt.lng, text: featureName(f) }); }
-    }
-    return out;
-  }, [displayFeatures, visits]);
 
   // Compare coloring when a person overlay is selected; else default status colors.
   const colorOverride = useMemo(() => {
@@ -496,8 +487,15 @@ export default function App() {
       </aside>
 
       <main className="map-wrap">
+        {selectedFeature && (
+          <div className="map-banner">
+            <span className="mb-name">{selName}</span>
+            {selVisit && <span className="mb-pill" style={{ background: STATUS_META[selVisit.status].color }}>{STATUS_META[selVisit.status].label}</span>}
+            <button className="mb-x" onClick={() => setSelectedId(null)} aria-label="Close">×</button>
+          </div>
+        )}
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} labels={labels} onPick={pick} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
         </Suspense>
       </main>
 

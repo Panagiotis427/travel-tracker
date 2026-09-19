@@ -26,7 +26,7 @@ interface Props {
   labels?: LabelPoint[];
   onPick: (id: string) => void;
   onHover?: (id: string | null) => void;
-  onZoom?: (altitude: number) => void;
+  onZoom?: (pov: Pov) => void;
   pov?: Pov | null;
 }
 
@@ -45,7 +45,8 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
 
   const capColor = (d: unknown): string => {
     const id = idOf(d);
-    const st = statusesRef.current[id];
+    // A region with no mark of its own inherits its country's mark (id "USA-3514" -> "USA").
+    const st = statusesRef.current[id] ?? (id.includes('-') ? statusesRef.current[id.split('-')[0]] : undefined);
     const base = st ? STATUS_META[st].color : UNVISITED_COLOR;
     if (id === selectedRef.current) return lighten(base, 0.4);
     if (id === hoverRef.current) return lighten(base, 0.18);
@@ -88,11 +89,11 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .labelLat((d: object) => (d as LabelPoint).lat)
       .labelLng((d: object) => (d as LabelPoint).lng)
       .labelText((d: object) => (d as LabelPoint).text)
-      .labelSize(1.15)
-      .labelDotRadius(0.22)
-      .labelColor(() => 'rgba(255,255,255,0.92)')
+      .labelSize(1.0)
+      .labelDotRadius(0)
+      .labelColor(() => 'rgba(255,255,255,0.9)')
       .labelResolution(2)
-      .labelAltitude(0.013)
+      .labelAltitude(0.002)
       .labelsData(labels ?? []);
     globeRef.current = globe;
 
@@ -103,7 +104,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const stopSpin = () => { controls.autoRotate = false; };
     el.addEventListener('pointerdown', stopSpin, { once: true });
 
-    globe.onZoom((p: { altitude: number }) => cbRef.current.onZoom?.(p.altitude));
+    globe.onZoom((p: Pov) => cbRef.current.onZoom?.(p));
 
     const resize = () => globe.width(el.clientWidth).height(el.clientHeight);
     resize();

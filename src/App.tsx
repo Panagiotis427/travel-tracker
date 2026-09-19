@@ -16,30 +16,29 @@ import { isNative, startBackground, stopBackground } from './features/bgLocation
 const GlobeView = lazy(() => import('./map/GlobeView'));
 const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
 
-const COUNTRY_TARGET = 195; // UN members + observers — stable denominator
+const COUNTRY_TARGET = 195;
 const STATUSES: Status[] = ['visited', 'want', 'lived', 'transit'];
 const LAYERS = { '110m': 'geo/world_110m.topojson', '50m': 'geo/world_50m.topojson', '10m': 'geo/world_10m.topojson' } as const;
 type Lod = keyof typeof LAYERS;
 const TEX = { dark: 'textures/earth-dark.jpg', day: 'textures/earth-blue-marble.jpg' } as const;
 const OVERVIEW: Pov = { lat: 20, lng: 0, altitude: 2.3 };
+const EXPAND_ALT = 0.9; // below this camera altitude, the viewed country resolves into its regions
+const MAX_EXPANDED = 6; // cap rendered region-sets for mobile performance
 const BG_KEY = 'travel-tracker:bg';
 
 interface CountryMeta { name: string; sov: boolean; }
 
 export default function App() {
   const [visits, setVisits] = useState<VisitMap>({});
-  const [mode, setMode] = useState<'world' | 'country'>('world');
   const [lod, setLod] = useState<Lod>('50m');
   const [theme, setTheme] = useState<'dark' | 'day'>('dark');
   const [worldFeatures, setWorldFeatures] = useState<CountryFeature[]>([]);
-  const [country, setCountry] = useState<{ a3: string; name: string } | null>(null);
-  const [regionFeatures, setRegionFeatures] = useState<CountryFeature[]>([]);
+  const [regions, setRegions] = useState<Record<string, CountryFeature[]>>({});
+  const [expanded, setExpanded] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pov, setPov] = useState<Pov | null>(null);
   const [query, setQuery] = useState('');
   const [meta, setMeta] = useState<Record<string, CountryMeta>>({});
-  const [drilling, setDrilling] = useState(false);
-  const [drillErr, setDrillErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
@@ -47,6 +46,7 @@ export default function App() {
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
+  const loadedRef = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
@@ -75,16 +75,34 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onZoom = useCallback((altitude: number) => {
-    if (mode !== 'world') return;
+  // Seamless LOD: swap admin-0 detail by zoom, and resolve the viewed country
+  // into its regions when zoomed in (only a few countries expanded at once).
+  function onZoom(p: Pov) {
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
-    lodTimer.current = window.setTimeout(() => {
-      const want: Lod = altitude < 0.55 ? '10m' : '50m';
-      setLod((cur) => { if (cur !== want) void loadWorld(want); return want; });
+    lodTimer.current = window.setTimeout(async () => {
+      const wantLod: Lod = p.altitude < 0.55 ? '10m' : '50m';
+      setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
+      if (p.altitude > EXPAND_ALT) { setExpanded((e) => (e.length ? [] : e)); return; }
+      await initCountryIndex();
+      const c = classifyCountry(p.lng, p.lat);
+      if (!c) return;
+      if (!loadedRef.current.has(c.id)) {
+        loadedRef.current.add(c.id);
+        try { const rs = await loadAdmin1(c.id); setRegions((prev) => ({ ...prev, [c.id]: rs })); }
+        catch { loadedRef.current.delete(c.id); return; }
+      }
+      setExpanded((prev) => (prev.includes(c.id) ? prev : [c.id, ...prev].slice(0, MAX_EXPANDED)));
     }, 180);
-  }, [mode, loadWorld]);
+  }
 
-  const displayFeatures = mode === 'country' ? regionFeatures : worldFeatures;
+  // Unified layer: countries not expanded, plus the regions of expanded countries.
+  const displayFeatures = useMemo(() => {
+    const exp = new Set(expanded);
+    const out: CountryFeature[] = [];
+    for (const f of worldFeatures) if (!exp.has(f.id)) out.push(f);
+    for (const a3 of expanded) { const rs = regions[a3]; if (rs) out.push(...rs); }
+    return out;
+  }, [worldFeatures, expanded, regions]);
 
   const statuses = useMemo(() => {
     const m: StatusMap = {};
@@ -92,31 +110,34 @@ export default function App() {
     return m;
   }, [visits]);
 
-  const selectedFeature = useMemo(
-    () => displayFeatures.find((f) => f.id === selectedId) ?? null,
-    [displayFeatures, selectedId],
-  );
+  const featureById = useCallback((id: string): CountryFeature | null => {
+    return (
+      displayFeatures.find((f) => f.id === id) ??
+      worldFeatures.find((f) => f.id === id) ??
+      Object.values(regions).flat().find((f) => f.id === id) ??
+      null
+    );
+  }, [displayFeatures, worldFeatures, regions]);
 
-  // Labels for marked places (+ the current selection).
+  const selectedFeature = useMemo(() => (selectedId ? featureById(selectedId) : null), [selectedId, featureById]);
+
   const labels = useMemo<LabelPoint[]>(() => {
     const out: LabelPoint[] = [];
     for (const f of displayFeatures) {
-      if (visits[f.id] || f.id === selectedId) {
-        const p = focusOf(f.geometry);
-        out.push({ lat: p.lat, lng: p.lng, text: featureName(f) });
-      }
+      if (visits[f.id]) { const pt = focusOf(f.geometry); out.push({ lat: pt.lat, lng: pt.lng, text: featureName(f) }); }
     }
     return out;
-  }, [displayFeatures, visits, selectedId]);
+  }, [displayFeatures, visits]);
 
-  const pick = useCallback((id: string) => {
+  function pick(id: string) {
     setSelectedId(id);
-    setDrillErr(null);
-    const f = displayFeatures.find((x) => x.id === id);
+    const f = featureById(id);
     if (f) setPov(focusOf(f.geometry));
-  }, [displayFeatures]);
+  }
 
-  // --- mutations (state + IndexedDB) ---
+  const dtv = (s?: string) => (s ? (s.includes('T') ? s : `${s}T00:00`) : '');
+
+  // --- mutations ---
   function setStatus(id: string, status: Status | null) {
     if (status === null) {
       setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
@@ -137,41 +158,11 @@ export default function App() {
     });
   }
   const addTrip = (id: string) => mutateTrips(id, (t) => [...t, {}]);
-  const updateTrip = (id: string, i: number, patch: Partial<Trip>) =>
-    mutateTrips(id, (t) => t.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const updateTrip = (id: string, i: number, patch: Partial<Trip>) => mutateTrips(id, (t) => t.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const removeTrip = (id: string, i: number) => mutateTrips(id, (t) => t.filter((_, j) => j !== i));
 
-  async function drill() {
-    if (!selectedFeature) return;
-    const a3 = selectedFeature.id;
-    setDrilling(true);
-    setDrillErr(null);
-    try {
-      const regions = await loadAdmin1(a3);
-      if (!regions.length) throw new Error('no sub-regions');
-      setRegionFeatures(regions);
-      setCountry({ a3, name: featureName(selectedFeature) });
-      setMode('country');
-      setSelectedId(null);
-      setPov(focusOf(selectedFeature.geometry));
-    } catch {
-      setDrillErr('No sub-regions available for this country.');
-    } finally {
-      setDrilling(false);
-    }
-  }
-
-  function backToWorld() {
-    setMode('world');
-    setCountry(null);
-    setRegionFeatures([]);
-    setSelectedId(null);
-    setPov({ ...OVERVIEW });
-  }
   function resetView() { setSelectedId(null); setPov({ ...OVERVIEW }); }
-  function clearAll() {
-    if (window.confirm('Clear all marks? This cannot be undone.')) { setVisits({}); void clearVisits(); }
-  }
+  function clearAll() { if (window.confirm('Clear all marks? This cannot be undone.')) { setVisits({}); void clearVisits(); } }
 
   function applyImport(agg: AggMap) {
     setVisits((prev) => {
@@ -185,15 +176,13 @@ export default function App() {
         if (!trips.length) trips.push({ start: a.start, end: a.end });
         else trips[0] = { ...trips[0], start: minIso(trips[0].start, a.start), end: maxIso(trips[0].end, a.end) };
         const next: Visit = { status, trips, updatedAt: now };
-        copy[id] = next;
-        changed[id] = next;
+        copy[id] = next; changed[id] = next;
       }
       void putMany(changed);
       return copy;
     });
   }
 
-  // Classify a coordinate and mark the country (+ region) with today's trip.
   const markCoords = useCallback(async (lat: number, lng: number) => {
     await initCountryIndex();
     const c = classifyCountry(lng, lat);
@@ -210,8 +199,7 @@ export default function App() {
         const trips = [...(cur?.trips ?? [])];
         if (!trips.some((t) => t.start === today && t.end === today)) trips.push({ start: today, end: today });
         const next: Visit = { status, trips, updatedAt: now };
-        copy[id] = next;
-        changed[id] = next;
+        copy[id] = next; changed[id] = next;
       };
       mark(c.id);
       if (r) mark(r.id);
@@ -236,31 +224,14 @@ export default function App() {
     );
   }
 
-  // Background tracking (Android app only).
   async function toggleBg() {
-    if (!isNative()) {
-      window.alert('Background tracking runs in the Android app only. On web/desktop, use "Mark my location".');
-      return;
-    }
-    if (bgOn) {
-      await stopBackground();
-      setBgOn(false);
-      try { localStorage.setItem(BG_KEY, '0'); } catch { /* ignore */ }
-    } else {
-      const ok = await startBackground((la, ln) => { void markCoords(la, ln); });
-      setBgOn(ok);
-      if (ok) try { localStorage.setItem(BG_KEY, '1'); } catch { /* ignore */ }
-    }
+    if (!isNative()) { window.alert('Background tracking runs in the Android app only. On web/desktop, use "Mark my location".'); return; }
+    if (bgOn) { await stopBackground(); setBgOn(false); try { localStorage.setItem(BG_KEY, '0'); } catch { /* ignore */ } }
+    else { const ok = await startBackground((la, ln) => { void markCoords(la, ln); }); setBgOn(ok); if (ok) try { localStorage.setItem(BG_KEY, '1'); } catch { /* ignore */ } }
   }
-
-  // Resume background tracking on native if it was on.
   useEffect(() => {
     if (!isNative()) return;
-    try {
-      if (localStorage.getItem(BG_KEY) === '1') {
-        startBackground((la, ln) => { void markCoords(la, ln); }).then(setBgOn);
-      }
-    } catch { /* ignore */ }
+    try { if (localStorage.getItem(BG_KEY) === '1') startBackground((la, ln) => { void markCoords(la, ln); }).then(setBgOn); } catch { /* ignore */ }
   }, [markCoords]);
 
   function exportJson() {
@@ -268,12 +239,9 @@ export default function App() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `scratch-globe-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
+    a.href = url; a.download = `scratch-globe-${new Date().toISOString().slice(0, 10)}.json`; a.click();
     URL.revokeObjectURL(url);
   }
-
   function onImportFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -295,27 +263,25 @@ export default function App() {
           void putMany(changed);
           return merged;
         });
-      } catch {
-        window.alert('Could not read that file — expected a Scratch Globe export.');
-      }
+      } catch { window.alert('Could not read that file — expected a Scratch Globe export.'); }
     };
     reader.readAsText(file);
   }
 
-  // --- stats (stable denominator; hyphen id = admin-1 region) ---
+  // --- stats (country counts if it or any of its regions is been) ---
   const stats = useMemo(() => {
-    let countriesBeen = 0, territoriesBeen = 0, regionsMarked = 0, totalDays = 0;
+    const been = new Set<string>();
+    let regionsMarked = 0, totalDays = 0;
     const counts: Record<Status, number> = { visited: 0, want: 0, lived: 0, transit: 0 };
     for (const [id, v] of Object.entries(visits)) {
       counts[v.status]++;
       for (const t of v.trips) { const d = durationDays(t.start, t.end); if (d) totalDays += d; }
-      if (id.includes('-')) { regionsMarked++; continue; }
-      const been = v.status === 'visited' || v.status === 'lived';
-      if (!been) continue;
-      if (meta[id]?.sov ?? true) countriesBeen++;
-      else territoriesBeen++;
+      if (id.includes('-')) regionsMarked++;
+      if (v.status === 'visited' || v.status === 'lived') been.add(id.includes('-') ? id.split('-')[0] : id);
     }
-    return { countriesBeen, territoriesBeen, regionsMarked, totalDays, counts };
+    let countriesBeen = 0;
+    for (const a3 of been) if (meta[a3]?.sov ?? true) countriesBeen++;
+    return { countriesBeen, regionsMarked, totalDays, counts };
   }, [visits, meta]);
 
   const pct = Math.round((stats.countriesBeen / COUNTRY_TARGET) * 100);
@@ -331,51 +297,38 @@ export default function App() {
 
   const selName = selectedFeature ? featureName(selectedFeature) : '';
   const selVisit = selectedId ? visits[selectedId] : undefined;
+  const isRegion = !!selectedId && selectedId.includes('-');
   const selSub = selectedFeature
-    ? mode === 'country'
-      ? `${selectedFeature.properties?.type_en ?? 'Region'}${country ? ` · ${country.name}` : ''}`
+    ? isRegion
+      ? `${selectedFeature.properties?.type_en ?? 'Region'}${meta[selectedId!.split('-')[0]] ? ` · ${meta[selectedId!.split('-')[0]].name}` : ''}`
       : [selectedFeature.properties?.SUBREGION, selectedFeature.properties?.CONTINENT].filter(Boolean)[0] ?? ''
     : '';
   const totalDur = selVisit ? fmtDuration(selVisit.trips.reduce((s, t) => s + (durationDays(t.start, t.end) ?? 0), 0)) : '';
-  const regionsHere = mode === 'country' ? regionFeatures.filter((f) => visits[f.id]).length : 0;
 
   return (
     <div className="app">
       <aside className="sidebar">
         <h1>Scratch Globe</h1>
 
-        {mode === 'world' ? (
-          <>
-            <div className="stat">
-              <div className="stat-big">{pct}%</div>
-              <div className="stat-label">
-                {stats.countriesBeen} of {COUNTRY_TARGET} countries
-                {stats.territoriesBeen ? ` · +${stats.territoriesBeen} territories` : ''}
-                {stats.regionsMarked ? ` · ${stats.regionsMarked} regions` : ''}
-                {stats.totalDays ? ` · ${stats.totalDays} days` : ''}
-              </div>
-            </div>
-
-            <div className="search">
-              <input placeholder="Search country…" value={query} onChange={(e) => setQuery(e.target.value)} />
-              {matches.length > 0 && (
-                <ul className="search-list">
-                  {matches.map((f) => (
-                    <li key={f.id} onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="country-head">
-            <button className="back" onClick={backToWorld}>‹ World</button>
-            <div>
-              <div className="panel-name">{country?.name}</div>
-              <div className="stat-label">{regionsHere ? `${regionsHere} of ${regionFeatures.length} regions` : 'Tap regions to mark'}</div>
-            </div>
+        <div className="stat">
+          <div className="stat-big">{pct}%</div>
+          <div className="stat-label">
+            {stats.countriesBeen} of {COUNTRY_TARGET} countries
+            {stats.regionsMarked ? ` · ${stats.regionsMarked} regions` : ''}
+            {stats.totalDays ? ` · ${stats.totalDays} days` : ''}
           </div>
-        )}
+        </div>
+
+        <div className="search">
+          <input placeholder="Search country…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {matches.length > 0 && (
+            <ul className="search-list">
+              {matches.map((f) => (
+                <li key={f.id} onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         {selectedFeature && (
           <div className="panel">
@@ -389,12 +342,7 @@ export default function App() {
 
             <div className="status-grid">
               {STATUSES.map((s) => (
-                <button
-                  key={s}
-                  className={selVisit?.status === s ? 'st on' : 'st'}
-                  style={{ '--c': STATUS_META[s].color } as CSSProperties}
-                  onClick={() => setStatus(selectedId!, s)}
-                >
+                <button key={s} className={selVisit?.status === s ? 'st on' : 'st'} style={{ '--c': STATUS_META[s].color } as CSSProperties} onClick={() => setStatus(selectedId!, s)}>
                   {STATUS_META[s].label}
                 </button>
               ))}
@@ -407,10 +355,10 @@ export default function App() {
                   <div className="trip" key={i}>
                     <div className="date-row">
                       <label>From
-                        <input type="date" value={t.start ?? ''} onChange={(e) => updateTrip(selectedId!, i, { start: e.target.value || undefined })} />
+                        <input type="datetime-local" value={dtv(t.start)} onChange={(e) => updateTrip(selectedId!, i, { start: e.target.value || undefined })} />
                       </label>
                       <label>To
-                        <input type="date" value={t.end ?? ''} onChange={(e) => updateTrip(selectedId!, i, { end: e.target.value || undefined })} />
+                        <input type="datetime-local" value={dtv(t.end)} onChange={(e) => updateTrip(selectedId!, i, { end: e.target.value || undefined })} />
                       </label>
                       <button className="x trip-x" onClick={() => removeTrip(selectedId!, i)} aria-label="Remove trip">×</button>
                     </div>
@@ -421,23 +369,12 @@ export default function App() {
                 {totalDur && <div className="dur">{totalDur} total</div>}
               </div>
             )}
-
-            {mode === 'world' && (
-              <button className="drill" onClick={drill} disabled={drilling}>
-                {drilling ? 'Loading…' : 'Drill into regions'}
-              </button>
-            )}
-            {drillErr && <div className="err">{drillErr}</div>}
           </div>
         )}
 
         <ul className="legend">
           {STATUSES.map((s) => (
-            <li key={s}>
-              <span className="swatch" style={{ background: STATUS_META[s].color }} />
-              {STATUS_META[s].label}
-              <b>{stats.counts[s]}</b>
-            </li>
+            <li key={s}><span className="swatch" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}<b>{stats.counts[s]}</b></li>
           ))}
           <li><span className="swatch" style={{ background: UNVISITED_COLOR }} />Unvisited</li>
         </ul>
@@ -448,9 +385,7 @@ export default function App() {
           <button className={bgOn ? 'io bg-on' : 'io'} onClick={toggleBg}>Background GPS: {bgOn ? 'On' : 'Off'}</button>
           {geoMsg && <div className="stat-label geo-msg">{geoMsg}</div>}
           <div className="io-row">
-            <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>
-              {theme === 'dark' ? 'Day globe' : 'Night globe'}
-            </button>
+            <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>{theme === 'dark' ? 'Day globe' : 'Night globe'}</button>
             <button className="io" onClick={resetView}>Reset view</button>
           </div>
           <div className="io-row">
@@ -460,21 +395,12 @@ export default function App() {
           <button className="reset" onClick={clearAll}>Clear all marks</button>
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImportFile} />
         </div>
-        <footer>{loading ? 'Loading globe…' : mode === 'country' ? `${regionFeatures.length} regions` : `${lod} · ${worldFeatures.length} countries`}</footer>
+        <footer>{loading ? 'Loading globe…' : `${lod} · ${displayFeatures.length} shapes · zoom in for regions`}</footer>
       </aside>
 
       <main className="map-wrap">
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView
-            polygons={displayFeatures}
-            statuses={statuses}
-            selectedId={selectedId}
-            globeImage={globeImage}
-            labels={labels}
-            onPick={pick}
-            onZoom={onZoom}
-            pov={pov}
-          />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} labels={labels} onPick={pick} onZoom={onZoom} pov={pov} />
         </Suspense>
       </main>
 

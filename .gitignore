@@ -1,0 +1,11 @@
+# deps
+node_modules/
+# pipeline temp
+tools/geo-pipeline/.tmp/
+# os
+Thumbs.db
+.DS_Store
+# app build dirs (added once framework is chosen)
+build/
+dist/
+.dart_tool/

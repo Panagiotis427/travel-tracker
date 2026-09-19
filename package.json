@@ -1,0 +1,28 @@
+{
+  "name": "travel-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Private $0 open-source polygon scratch-map travel tracker (web PWA; Android/desktop later).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "geo": "npm --prefix tools/geo-pipeline run all && node tools/copy-geo.mjs"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/geojson": "^7946.0.16",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^4.4.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  }
+}

@@ -2,6 +2,9 @@
 node_modules/
 # pipeline temp
 tools/geo-pipeline/.tmp/
+tools/geo-pipeline/.tmp2/
+tools/geo-pipeline/.admin2.log
+tools/geo-pipeline/.admin2.err
 # os
 Thumbs.db
 .DS_Store

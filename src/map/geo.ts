@@ -54,6 +54,11 @@ export async function loadAdmin1(a3: string): Promise<CountryFeature[]> {
   return loadFeatures(import.meta.env.BASE_URL + `geo/admin1/${a3}.topojson`);
 }
 
+/** Admin-2 (counties/districts) for one country, by ADM0_A3. Throws if absent. */
+export async function loadAdmin2(a3: string): Promise<CountryFeature[]> {
+  return loadFeatures(import.meta.env.BASE_URL + `geo/admin2/${a3}.topojson`);
+}
+
 // --- 2D canvas path (kept for the flat view + EXIF point-in-polygon) ---------
 function addRing(path: Path2D, ring: Position[]): void {
   for (let i = 0; i < ring.length; i++) {

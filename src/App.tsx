@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
-import { loadFeatures, loadAdmin1, featureName, isSovereign } from './map/geo';
+import { loadFeatures, loadAdmin1, loadAdmin2, featureName, isSovereign } from './map/geo';
 import type { CountryFeature } from './map/geo';
 import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
 import { focusOf } from './lib/geo-util';
 import type { Pov } from './lib/geo-util';
 import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates';
+import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
@@ -22,19 +23,37 @@ const LAYERS = { '110m': 'geo/world_110m.topojson', '50m': 'geo/world_50m.topojs
 type Lod = keyof typeof LAYERS;
 const TEX = { dark: 'textures/earth-dark.jpg', day: 'textures/earth-blue-marble.jpg' } as const;
 const OVERVIEW: Pov = { lat: 20, lng: 0, altitude: 2.3 };
-const EXPAND_ALT = 0.9; // below this camera altitude, the viewed country resolves into its regions
-const MAX_EXPANDED = 6; // cap rendered region-sets for mobile performance
+const EXPAND_ALT = 0.9;  // resolve into Admin-1
+const A2_ALT = 0.32;     // resolve into Admin-2
+const MAX_EXPANDED = 6;
 const BG_KEY = 'travel-tracker:bg';
+const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
+const BOTH_COLOR = '#8e44ad';
 
 interface CountryMeta { name: string; sov: boolean; }
+interface Overlay { id: string; name: string; color: string; statuses: StatusMap; }
+
+// "Been" checker for a status map: a country counts if it or any of its regions is
+// visited/lived; a region counts if it or its parent country is.
+function beenChecker(m: StatusMap): (id: string) => boolean {
+  const country = new Set<string>();
+  const region = new Set<string>();
+  for (const [id, s] of Object.entries(m)) {
+    if (s !== 'visited' && s !== 'lived') continue;
+    if (id.includes('-')) { region.add(id); country.add(id.split('-')[0]); }
+    else country.add(id);
+  }
+  return (id) => (id.includes('-') ? region.has(id) || country.has(id.split('-')[0]) : country.has(id));
+}
 
 export default function App() {
   const [visits, setVisits] = useState<VisitMap>({});
   const [lod, setLod] = useState<Lod>('50m');
   const [theme, setTheme] = useState<'dark' | 'day'>('dark');
   const [worldFeatures, setWorldFeatures] = useState<CountryFeature[]>([]);
-  const [regions, setRegions] = useState<Record<string, CountryFeature[]>>({});
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [regions1, setRegions1] = useState<Record<string, CountryFeature[]>>({});
+  const [regions2, setRegions2] = useState<Record<string, CountryFeature[]>>({});
+  const [expanded, setExpanded] = useState<Record<string, 1 | 2>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pov, setPov] = useState<Pov | null>(null);
   const [query, setQuery] = useState('');
@@ -43,10 +62,14 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const [bgOn, setBgOn] = useState(false);
+  const [overlays, setOverlays] = useState<Overlay[]>([]);
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
-  const loadedRef = useRef<Set<string>>(new Set());
+  const loaded1 = useRef<Set<string>>(new Set());
+  const loaded2 = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
@@ -75,34 +98,63 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Seamless LOD: swap admin-0 detail by zoom, and resolve the viewed country
-  // into its regions when zoomed in (only a few countries expanded at once).
+  // Import a shared map from the URL hash (#s=...) once on load.
+  useEffect(() => {
+    const h = window.location.hash;
+    if (h.startsWith('#s=')) {
+      void addOverlayFromCode(h.slice(3));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Seamless LOD: swap admin-0 detail, then resolve the viewed country into
+  // Admin-1 (zoom in) or Admin-2 (zoom in further); only a few kept expanded.
   function onZoom(p: Pov) {
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
     lodTimer.current = window.setTimeout(async () => {
       const wantLod: Lod = p.altitude < 0.55 ? '10m' : '50m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
-      if (p.altitude > EXPAND_ALT) { setExpanded((e) => (e.length ? [] : e)); return; }
+
+      const wantLevel = p.altitude < A2_ALT ? 2 : p.altitude < EXPAND_ALT ? 1 : 0;
+      if (wantLevel === 0) { setExpanded((e) => (Object.keys(e).length ? {} : e)); return; }
+
       await initCountryIndex();
       const c = classifyCountry(p.lng, p.lat);
       if (!c) return;
-      if (!loadedRef.current.has(c.id)) {
-        loadedRef.current.add(c.id);
-        try { const rs = await loadAdmin1(c.id); setRegions((prev) => ({ ...prev, [c.id]: rs })); }
-        catch { loadedRef.current.delete(c.id); return; }
+      const a3 = c.id;
+
+      if (!loaded1.current.has(a3)) {
+        loaded1.current.add(a3);
+        try { const rs = await loadAdmin1(a3); setRegions1((prev) => ({ ...prev, [a3]: rs })); }
+        catch { loaded1.current.delete(a3); }
       }
-      setExpanded((prev) => (prev.includes(c.id) ? prev : [c.id, ...prev].slice(0, MAX_EXPANDED)));
+      if (wantLevel === 2 && !loaded2.current.has(a3)) {
+        loaded2.current.add(a3);
+        try { const rs = await loadAdmin2(a3); setRegions2((prev) => ({ ...prev, [a3]: rs })); }
+        catch { loaded2.current.delete(a3); }
+      }
+
+      setExpanded((prev) => {
+        const level: 1 | 2 = wantLevel === 2 && loaded2.current.has(a3) ? 2 : 1;
+        const next: Record<string, 1 | 2> = { [a3]: level };
+        for (const [k, v] of Object.entries(prev).filter(([k2]) => k2 !== a3).slice(0, MAX_EXPANDED - 1)) next[k] = v;
+        return next;
+      });
     }, 180);
   }
 
-  // Unified layer: countries not expanded, plus the regions of expanded countries.
   const displayFeatures = useMemo(() => {
-    const exp = new Set(expanded);
     const out: CountryFeature[] = [];
-    for (const f of worldFeatures) if (!exp.has(f.id)) out.push(f);
-    for (const a3 of expanded) { const rs = regions[a3]; if (rs) out.push(...rs); }
+    for (const f of worldFeatures) {
+      const lvl = expanded[f.id];
+      if (!lvl) { out.push(f); continue; }
+      if (lvl === 2 && regions2[f.id]) out.push(...regions2[f.id]);
+      else if (regions1[f.id]) out.push(...regions1[f.id]);
+      else out.push(f);
+    }
     return out;
-  }, [worldFeatures, expanded, regions]);
+  }, [worldFeatures, expanded, regions1, regions2]);
 
   const statuses = useMemo(() => {
     const m: StatusMap = {};
@@ -114,10 +166,11 @@ export default function App() {
     return (
       displayFeatures.find((f) => f.id === id) ??
       worldFeatures.find((f) => f.id === id) ??
-      Object.values(regions).flat().find((f) => f.id === id) ??
+      Object.values(regions1).flat().find((f) => f.id === id) ??
+      Object.values(regions2).flat().find((f) => f.id === id) ??
       null
     );
-  }, [displayFeatures, worldFeatures, regions]);
+  }, [displayFeatures, worldFeatures, regions1, regions2]);
 
   const selectedFeature = useMemo(() => (selectedId ? featureById(selectedId) : null), [selectedId, featureById]);
 
@@ -129,6 +182,23 @@ export default function App() {
     return out;
   }, [displayFeatures, visits]);
 
+  // Compare coloring when a person overlay is selected; else default status colors.
+  const colorOverride = useMemo(() => {
+    if (!compareId) return undefined;
+    const ov = overlays.find((o) => o.id === compareId);
+    if (!ov) return undefined;
+    const mine = beenChecker(statuses);
+    const theirs = beenChecker(ov.statuses);
+    return (id: string): string | null => {
+      const y = mine(id);
+      const t = theirs(id);
+      if (y && t) return BOTH_COLOR;
+      if (y) return STATUS_META.visited.color;
+      if (t) return ov.color;
+      return null;
+    };
+  }, [compareId, overlays, statuses]);
+
   function pick(id: string) {
     setSelectedId(id);
     const f = featureById(id);
@@ -137,12 +207,8 @@ export default function App() {
 
   const dtv = (s?: string) => (s ? (s.includes('T') ? s : `${s}T00:00`) : '');
 
-  // --- mutations ---
   function setStatus(id: string, status: Status | null) {
-    if (status === null) {
-      setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
-      return;
-    }
+    if (status === null) { setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; }); return; }
     setVisits((prev) => {
       const next: Visit = { status, trips: prev[id]?.trips ?? [], updatedAt: new Date().toISOString() };
       void putVisit(id, next);
@@ -234,6 +300,32 @@ export default function App() {
     try { if (localStorage.getItem(BG_KEY) === '1') startBackground((la, ln) => { void markCoords(la, ln); }).then(setBgOn); } catch { /* ignore */ }
   }, [markCoords]);
 
+  // --- sharing (backend-free) ---
+  async function shareMine() {
+    if (!Object.keys(statuses).length) { setShareMsg('Nothing marked to share yet.'); return; }
+    const name = window.prompt('Your name for the shared map?', 'Me');
+    if (name === null) return;
+    const code = await encodeShare(name || 'Me', statuses);
+    const link = `${window.location.origin}${window.location.pathname}#s=${code}`;
+    try { await navigator.clipboard.writeText(link); setShareMsg('Share link copied to clipboard.'); }
+    catch { window.prompt('Copy your share link:', link); setShareMsg('Share link ready.'); }
+  }
+  async function addOverlayFromCode(code: string) {
+    try {
+      const { name, statuses: st } = await decodeShare(extractCode(code));
+      setOverlays((prev) => [...prev, { id: crypto.randomUUID(), name, color: OVERLAY_COLORS[prev.length % OVERLAY_COLORS.length], statuses: st }]);
+      setShareMsg(`Added ${name}.`);
+    } catch { setShareMsg('Could not read that share link.'); }
+  }
+  function addOverlayPrompt() {
+    const code = window.prompt('Paste a share link:');
+    if (code) void addOverlayFromCode(code);
+  }
+  function removeOverlay(id: string) {
+    setOverlays((prev) => prev.filter((o) => o.id !== id));
+    setCompareId((c) => (c === id ? null : c));
+  }
+
   function exportJson() {
     const data = { app: 'travel-tracker', version: 3, exportedAt: new Date().toISOString(), visits };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -268,7 +360,6 @@ export default function App() {
     reader.readAsText(file);
   }
 
-  // --- stats (country counts if it or any of its regions is been) ---
   const stats = useMemo(() => {
     const been = new Set<string>();
     let regionsMarked = 0, totalDays = 0;
@@ -289,10 +380,7 @@ export default function App() {
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return worldFeatures
-      .filter((f) => featureName(f).toLowerCase().includes(q))
-      .sort((a, b) => featureName(a).localeCompare(featureName(b)))
-      .slice(0, 8);
+    return worldFeatures.filter((f) => featureName(f).toLowerCase().includes(q)).sort((a, b) => featureName(a).localeCompare(featureName(b))).slice(0, 8);
   }, [query, worldFeatures]);
 
   const selName = selectedFeature ? featureName(selectedFeature) : '';
@@ -304,6 +392,7 @@ export default function App() {
       : [selectedFeature.properties?.SUBREGION, selectedFeature.properties?.CONTINENT].filter(Boolean)[0] ?? ''
     : '';
   const totalDur = selVisit ? fmtDuration(selVisit.trips.reduce((s, t) => s + (durationDays(t.start, t.end) ?? 0), 0)) : '';
+  const compareOverlay = overlays.find((o) => o.id === compareId);
 
   return (
     <div className="app">
@@ -323,9 +412,7 @@ export default function App() {
           <input placeholder="Search country…" value={query} onChange={(e) => setQuery(e.target.value)} />
           {matches.length > 0 && (
             <ul className="search-list">
-              {matches.map((f) => (
-                <li key={f.id} onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</li>
-              ))}
+              {matches.map((f) => (<li key={f.id} onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</li>))}
             </ul>
           )}
         </div>
@@ -339,27 +426,19 @@ export default function App() {
               </div>
               <button className="x" onClick={() => setSelectedId(null)} aria-label="Close">×</button>
             </div>
-
             <div className="status-grid">
               {STATUSES.map((s) => (
-                <button key={s} className={selVisit?.status === s ? 'st on' : 'st'} style={{ '--c': STATUS_META[s].color } as CSSProperties} onClick={() => setStatus(selectedId!, s)}>
-                  {STATUS_META[s].label}
-                </button>
+                <button key={s} className={selVisit?.status === s ? 'st on' : 'st'} style={{ '--c': STATUS_META[s].color } as CSSProperties} onClick={() => setStatus(selectedId!, s)}>{STATUS_META[s].label}</button>
               ))}
               <button className="st clear" onClick={() => setStatus(selectedId!, null)}>Clear</button>
             </div>
-
             {selVisit && (
               <div className="visit-fields">
                 {selVisit.trips.map((t, i) => (
                   <div className="trip" key={i}>
                     <div className="date-row">
-                      <label>From
-                        <input type="datetime-local" value={dtv(t.start)} onChange={(e) => updateTrip(selectedId!, i, { start: e.target.value || undefined })} />
-                      </label>
-                      <label>To
-                        <input type="datetime-local" value={dtv(t.end)} onChange={(e) => updateTrip(selectedId!, i, { end: e.target.value || undefined })} />
-                      </label>
+                      <label>From<input type="datetime-local" value={dtv(t.start)} onChange={(e) => updateTrip(selectedId!, i, { start: e.target.value || undefined })} /></label>
+                      <label>To<input type="datetime-local" value={dtv(t.end)} onChange={(e) => updateTrip(selectedId!, i, { end: e.target.value || undefined })} /></label>
                       <button className="x trip-x" onClick={() => removeTrip(selectedId!, i)} aria-label="Remove trip">×</button>
                     </div>
                     <textarea placeholder="Notes…" value={t.note ?? ''} onChange={(e) => updateTrip(selectedId!, i, { note: e.target.value || undefined })} />
@@ -373,11 +452,28 @@ export default function App() {
         )}
 
         <ul className="legend">
-          {STATUSES.map((s) => (
-            <li key={s}><span className="swatch" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}<b>{stats.counts[s]}</b></li>
-          ))}
+          {STATUSES.map((s) => (<li key={s}><span className="swatch" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}<b>{stats.counts[s]}</b></li>))}
           <li><span className="swatch" style={{ background: UNVISITED_COLOR }} />Unvisited</li>
         </ul>
+
+        <div className="people">
+          <div className="people-head"><span>People</span><button className="io" onClick={shareMine}>Share my map</button></div>
+          <ul className="people-list">
+            <li className={compareId ? '' : 'on'} onClick={() => setCompareId(null)}>
+              <span className="swatch" style={{ background: STATUS_META.visited.color }} />Me
+            </li>
+            {overlays.map((o) => (
+              <li key={o.id} className={compareId === o.id ? 'on' : ''}>
+                <span className="swatch" style={{ background: o.color }} />
+                <span className="pname" onClick={() => setCompareId(compareId === o.id ? null : o.id)}>{o.name}</span>
+                <button className="x" onClick={() => removeOverlay(o.id)} aria-label="Remove">×</button>
+              </li>
+            ))}
+          </ul>
+          <button className="io" onClick={addOverlayPrompt}>Add person from link</button>
+          {compareOverlay && <div className="stat-label">Comparing: <b style={{ color: STATUS_META.visited.color }}>you</b> · <b style={{ color: compareOverlay.color }}>{compareOverlay.name}</b> · <b style={{ color: BOTH_COLOR }}>both</b></div>}
+          {shareMsg && <div className="stat-label">{shareMsg}</div>}
+        </div>
 
         <div className="actions">
           <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
@@ -395,12 +491,13 @@ export default function App() {
           <button className="reset" onClick={clearAll}>Clear all marks</button>
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImportFile} />
         </div>
-        <footer>{loading ? 'Loading globe…' : `${lod} · ${displayFeatures.length} shapes · zoom in for regions`}</footer>
+        <footer>{loading ? 'Loading globe…' : `${lod} · ${displayFeatures.length} shapes · zoom for regions`}</footer>
+        <div className="credit">Boundaries: Natural Earth (public domain) · geoBoundaries (CC BY 4.0)</div>
       </aside>
 
       <main className="map-wrap">
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} labels={labels} onPick={pick} onZoom={onZoom} pov={pov} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} labels={labels} onPick={pick} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
         </Suspense>
       </main>
 

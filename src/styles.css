@@ -142,6 +142,13 @@ footer {
   font-size: 12px;
   margin-top: 14px;
 }
+.credit {
+  color: var(--muted);
+  opacity: 0.7;
+  font-size: 10px;
+  margin-top: 6px;
+  line-height: 1.4;
+}
 
 .map-wrap {
   flex: 1;
@@ -357,6 +364,46 @@ footer {
 .io.bg-on {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* people / sharing */
+.people {
+  margin-bottom: 16px;
+}
+.people-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.people-head .io {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+.people-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+}
+.people-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.people-list li.on {
+  background: rgba(74, 168, 255, 0.12);
+}
+.people-list .pname {
+  flex: 1;
+  cursor: pointer;
+}
+.people-list li:first-child {
+  cursor: pointer;
 }
 
 /* visit fields (dates / duration / note) */

@@ -28,26 +28,35 @@ interface Props {
   onHover?: (id: string | null) => void;
   onZoom?: (pov: Pov) => void;
   pov?: Pov | null;
+  /** When set, overrides fill color per id (for compare/overlay views); null = unvisited. */
+  colorOverride?: (id: string) => string | null;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, labels, onPick, onHover, onZoom, pov }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, labels, onPick, onHover, onZoom, pov, colorOverride }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
+  const coRef = useRef(colorOverride);
   const cbRef = useRef({ onPick, onHover, onZoom });
   statusesRef.current = statuses;
   selectedRef.current = selectedId;
+  coRef.current = colorOverride;
   cbRef.current = { onPick, onHover, onZoom };
 
   const idOf = (d: unknown) => String((d as CountryFeature).id);
 
   const capColor = (d: unknown): string => {
     const id = idOf(d);
-    // A region with no mark of its own inherits its country's mark (id "USA-3514" -> "USA").
-    const st = statusesRef.current[id] ?? (id.includes('-') ? statusesRef.current[id.split('-')[0]] : undefined);
-    const base = st ? STATUS_META[st].color : UNVISITED_COLOR;
+    let base: string;
+    if (coRef.current) {
+      base = coRef.current(id) ?? UNVISITED_COLOR;
+    } else {
+      // A region with no mark of its own inherits its country's mark (id "USA-3514" -> "USA").
+      const st = statusesRef.current[id] ?? (id.includes('-') ? statusesRef.current[id.split('-')[0]] : undefined);
+      base = st ? STATUS_META[st].color : UNVISITED_COLOR;
+    }
     if (id === selectedRef.current) return lighten(base, 0.4);
     if (id === hoverRef.current) return lighten(base, 0.18);
     return base;
@@ -122,7 +131,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   }, []);
 
   useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId]);
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
   useEffect(() => { if (pov) globeRef.current?.pointOfView(pov, 800); }, [pov]);
   useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
   useEffect(() => { globeRef.current?.labelsData(labels ?? []); }, [labels]);

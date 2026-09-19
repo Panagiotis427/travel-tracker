@@ -19,6 +19,8 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | EXIF import (Tier 1): drop photos -> auto-mark countries + regions | Done (web) |
 | PWA: installable + offline (service worker) | Done |
 | Polish: day/night globe, marked-place labels, multiple trips, mark-my-location | Done |
+| Unified zoom-LOD (countries -> Admin-1 -> Admin-2), no drill modes | Done |
+| Multi-person share links + compare overlays (no backend) | Done |
 | Deploy (GitHub Pages / Cloudflare) + Capacitor Android | Ready — see `docs/DEPLOY.md` |
 
 ## Run it
@@ -38,7 +40,13 @@ Tap a country to cycle its status (visited -> want -> lived -> clear). Drag to r
 npm run geo        # fetch NE, simplify to TopoJSON, validate PIP, copy to public/geo
 ```
 
-Data source: Natural Earth via `nvkelso/natural-earth-vector` (public domain). IDs use `ADM0_A3` (never `iso_a3`, which is `-99` for France/Norway/etc).
+Data sources: **Natural Earth** (Admin-0/1, public domain) via `nvkelso/natural-earth-vector`;
+**geoBoundaries** (Admin-2, CC BY 4.0) via their gbOpen API — `npm run admin2` in `tools/geo-pipeline`
+writes `public/geo/admin2/<A3>.topojson` (180 countries, ~20 MB). Admin-0 IDs use `ADM0_A3`
+(never `iso_a3`, which is `-99` for France/Norway/etc); region IDs are `A3-<n>` / `A3-2-<n>`.
+
+Attribution (required by CC BY 4.0): boundary data © geoBoundaries (Runfola et al.), CC BY 4.0;
+Natural Earth is public domain. This credit is shown in-app and here.
 
 ## Repository layout
 

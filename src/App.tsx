@@ -14,6 +14,7 @@ import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { pullRemote, pushRemote, deleteRemote, deleteAllRemote } from './state/cloud';
 import type { AggMap } from './features/ImportPhotos';
+import AuthScreen from './features/AuthScreen';
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
@@ -29,6 +30,7 @@ const EXPAND_ALT = 0.9;  // resolve into Admin-1
 const A2_ALT = 0.32;     // resolve into Admin-2
 const MAX_EXPANDED = 6;
 const BG_KEY = 'travel-tracker:bg';
+const WELCOME_KEY = 'travel-tracker:welcome';
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
 
@@ -69,9 +71,9 @@ export default function App() {
   const [compareId, setCompareId] = useState<string | null>(null);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPw, setAuthPw] = useState('');
-  const [authMsg, setAuthMsg] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
@@ -120,10 +122,17 @@ export default function App() {
   // Track the auth session (persists on this device = "remember me").
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // Show the optional welcome/auth screen on first run (only when cloud is set up).
+  useEffect(() => {
+    if (!authReady) return;
+    if (session) { setShowAuth(false); return; }
+    if (cloudEnabled && localStorage.getItem(WELCOME_KEY) !== '1') setShowAuth(true);
+  }, [authReady, session]);
 
   // On login: pull the user's cloud data, merge (last-write-wins), push the union.
   useEffect(() => {
@@ -282,25 +291,22 @@ export default function App() {
     }
   }
 
-  async function login() {
-    if (!supabase) return;
-    setAuthMsg('Signing in…');
-    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPw });
-    setAuthMsg(error ? error.message : null);
-    if (!error) setAuthPw('');
-  }
-  async function signup() {
-    if (!supabase) return;
-    setAuthMsg('Creating account…');
-    const { error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPw });
-    setAuthMsg(error ? error.message : 'Account created. If email confirmation is on, confirm via the email, then log in.');
-    if (!error) setAuthPw('');
-  }
   async function logout() {
     if (!supabase) return;
     await supabase.auth.signOut();
     syncedFor.current = null;
-    setAuthMsg(null);
+    setProfileMsg(null);
+  }
+  async function changePassword() {
+    if (!supabase) return;
+    const np = window.prompt('New password (at least 6 characters):');
+    if (!np) return;
+    const { error } = await supabase.auth.updateUser({ password: np });
+    setProfileMsg(error ? error.message : 'Password updated.');
+  }
+  function skipWelcome() {
+    setShowAuth(false);
+    try { localStorage.setItem(WELCOME_KEY, '1'); } catch { /* ignore */ }
   }
 
   function applyImport(agg: AggMap) {
@@ -534,22 +540,17 @@ export default function App() {
         {cloudEnabled && (
           <div className="account">
             {session ? (
-              <div className="acct-in">
-                <span className="acct-email">{session.user.email}</span>
-                <button className="io" onClick={logout}>Log out</button>
-              </div>
-            ) : (
               <>
-                <div className="people-head"><span>Account</span></div>
-                <input type="email" placeholder="Email" autoComplete="username" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
-                <input type="password" placeholder="Password" autoComplete="current-password" value={authPw} onChange={(e) => setAuthPw(e.target.value)} />
-                <div className="io-row">
-                  <button className="io" onClick={login}>Log in</button>
-                  <button className="io" onClick={signup}>Sign up</button>
+                <div className="acct-in">
+                  <span className="acct-email">{session.user.email}</span>
+                  <button className="io" onClick={logout}>Log out</button>
                 </div>
+                <button className="io" onClick={changePassword}>Change password</button>
               </>
+            ) : (
+              <button className="io" onClick={() => setShowAuth(true)}>Sign in / Sign up</button>
             )}
-            {authMsg && <div className="stat-label">{authMsg}</div>}
+            {profileMsg && <div className="stat-label">{profileMsg}</div>}
           </div>
         )}
 
@@ -610,6 +611,8 @@ export default function App() {
           <ImportPhotos onClose={() => setShowImport(false)} onApply={applyImport} />
         </Suspense>
       )}
+
+      {showAuth && !session && cloudEnabled && <AuthScreen onSkip={skipWelcome} />}
     </div>
   );
 }

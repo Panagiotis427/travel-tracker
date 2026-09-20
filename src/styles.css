@@ -478,6 +478,98 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.account .io {
+  width: 100%;
+  margin-top: 8px;
+}
+.acct-in .io {
+  width: auto;
+  margin-top: 0;
+}
+
+/* welcome / auth screen */
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.auth-card {
+  width: min(380px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+.auth-logo {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.auth-tag {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.auth-form input {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 15px;
+}
+.auth-primary {
+  background: var(--accent);
+  color: #08131a;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+.auth-primary:disabled {
+  opacity: 0.6;
+}
+.auth-switch {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px;
+}
+.auth-msg {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0;
+}
+.auth-skip {
+  margin-top: 14px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.auth-skip:hover {
+  color: var(--text);
+}
 
 /* visit fields (dates / duration / note) */
 .visit-fields {

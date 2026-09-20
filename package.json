@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Private $0 open-source polygon scratch-map travel tracker (web PWA; Android/desktop later).",
   "scripts": {
-    "dev": "vite",
-    "dev:host": "vite --host",
+    "dev": "node tools/sync-env.mjs && vite",
+    "dev:host": "node tools/sync-env.mjs && vite --host",
+    "env:sync": "node tools/sync-env.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

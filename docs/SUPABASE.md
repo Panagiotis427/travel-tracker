@@ -4,9 +4,17 @@ The app runs fully local with no accounts. Adding a free Supabase project turns 
 email/password login, "remember me" (session persists on the device), and per-user
 sync (your marks follow you across devices). Without the keys, nothing changes.
 
-## 1. Create the project
-1. Go to https://supabase.com, sign in, **New project** (Free plan). Choose a region and set a database password.
-2. Wait for it to provision (~1–2 min).
+## 1. Create an organization, then a project
+New accounts create an **organization** first — it is just a container; the
+project lives inside it.
+1. Go to https://supabase.com and sign in (GitHub login is easiest).
+2. If prompted, **create an organization**: any name (e.g. `personal`), plan **Free** -> Create organization.
+3. Now click **New project** (on the dashboard, or the button inside the org):
+   - Name: e.g. `travel-tracker`
+   - Database password: set a strong one and save it
+   - Region: the one closest to you
+   - Plan: Free
+   Create it and wait ~1–2 min for it to provision.
 
 ## 2. Create the table + security
 Supabase dashboard -> **SQL Editor** -> New query -> paste and **Run**:
@@ -23,11 +31,16 @@ create table if not exists public.visits (
 
 alter table public.visits enable row level security;
 
+drop policy if exists "own visits" on public.visits;
 create policy "own visits" on public.visits
   for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 ```
+
+(The `drop policy if exists` makes it safe to re-run. If you saw
+`policy "own visits" ... already exists`, it just means it was already created —
+the setup is done.)
 
 Row-level security means each user can only read/write their own rows.
 
@@ -38,7 +51,9 @@ so sign-up logs you straight in. Leave it on if you prefer email confirmation.
 ## 4. Get the keys
 Dashboard -> **Project Settings -> API**. Copy:
 - **Project URL**
-- **anon public** key (this key is public by design; RLS protects the data)
+- the client key: **anon public** (older projects) or **publishable key** / `sb_publishable_...`
+  (newer projects). Either one works as `VITE_SUPABASE_ANON_KEY`. Do NOT use the
+  `service_role` / secret key. The client key is public by design; RLS protects the data.
 
 ## 5. Local: create `.env.local`
 In `travel-tracker/`, copy `.env.example` to `.env.local` and fill in:

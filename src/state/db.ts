@@ -1,14 +1,13 @@
-// Local-first persistence in IndexedDB (one row per place). All calls are wrapped
-// so the app keeps working in-memory if storage is unavailable (private mode etc.).
-// Reads normalize legacy shapes; a one-time migration imports the old localStorage map.
+// Local-first persistence in IndexedDB, SCOPED PER USER. Keys are `${uid}::${placeId}`
+// so accounts never see each other's data. Guests (no uid) are handled by the caller:
+// nothing is written, so "continue without an account" saves nothing.
 import { openDB } from 'idb';
 import type { IDBPDatabase } from 'idb';
-import type { Status, Visit, VisitMap } from './status';
+import type { Visit, VisitMap } from './status';
 import { normalizeVisit } from './status';
 
 const DB_NAME = 'travel-tracker';
 const STORE = 'visits';
-const OLD_KEY = 'travel-tracker:statuses:v1';
 
 let dbp: Promise<IDBPDatabase> | null = null;
 function db(): Promise<IDBPDatabase> {
@@ -22,61 +21,51 @@ function db(): Promise<IDBPDatabase> {
   return dbp;
 }
 
-async function migrateFromLocalStorage(d: IDBPDatabase): Promise<VisitMap> {
-  const map: VisitMap = {};
-  try {
-    const raw = localStorage.getItem(OLD_KEY);
-    if (!raw) return map;
-    const old = JSON.parse(raw) as Record<string, Status>;
-    const now = new Date().toISOString();
-    const tx = d.transaction(STORE, 'readwrite');
-    for (const [id, status] of Object.entries(old)) {
-      const v: Visit = { status, trips: [], updatedAt: now };
-      map[id] = v;
-      await tx.store.put(v, id);
-    }
-    await tx.done;
-    localStorage.removeItem(OLD_KEY);
-  } catch {
-    /* ignore */
-  }
-  return map;
-}
+const key = (uid: string, id: string) => `${uid}::${id}`;
 
-export async function getAllVisits(): Promise<VisitMap> {
+export async function getUserVisits(uid: string): Promise<VisitMap> {
   try {
     const d = await db();
     const keys = await d.getAllKeys(STORE);
     const vals = await d.getAll(STORE);
+    const pref = `${uid}::`;
     const map: VisitMap = {};
     keys.forEach((k, i) => {
+      const ks = String(k);
+      if (!ks.startsWith(pref)) return;
       const v = normalizeVisit(vals[i]);
-      if (v) map[String(k)] = v;
+      if (v) map[ks.slice(pref.length)] = v;
     });
-    if (keys.length === 0) return migrateFromLocalStorage(d);
     return map;
   } catch {
     return {};
   }
 }
 
-export async function putVisit(id: string, v: Visit): Promise<void> {
-  try { const d = await db(); await d.put(STORE, v, id); } catch { /* ignore */ }
+export async function putUserVisit(uid: string, id: string, v: Visit): Promise<void> {
+  try { const d = await db(); await d.put(STORE, v, key(uid, id)); } catch { /* ignore */ }
 }
 
-export async function deleteVisit(id: string): Promise<void> {
-  try { const d = await db(); await d.delete(STORE, id); } catch { /* ignore */ }
+export async function deleteUserVisit(uid: string, id: string): Promise<void> {
+  try { const d = await db(); await d.delete(STORE, key(uid, id)); } catch { /* ignore */ }
 }
 
-export async function clearVisits(): Promise<void> {
-  try { const d = await db(); await d.clear(STORE); } catch { /* ignore */ }
-}
-
-export async function putMany(map: VisitMap): Promise<void> {
+export async function putUserMany(uid: string, map: VisitMap): Promise<void> {
   try {
     const d = await db();
     const tx = d.transaction(STORE, 'readwrite');
-    for (const [id, v] of Object.entries(map)) await tx.store.put(v, id);
+    for (const [id, v] of Object.entries(map)) tx.store.put(v, key(uid, id));
+    await tx.done;
+  } catch { /* ignore */ }
+}
+
+export async function clearUserVisits(uid: string): Promise<void> {
+  try {
+    const d = await db();
+    const keys = await d.getAllKeys(STORE);
+    const pref = `${uid}::`;
+    const tx = d.transaction(STORE, 'readwrite');
+    for (const k of keys) if (String(k).startsWith(pref)) tx.store.delete(k);
     await tx.done;
   } catch { /* ignore */ }
 }

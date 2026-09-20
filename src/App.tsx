@@ -9,7 +9,7 @@ import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates'
 import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
-import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
+import { getUserVisits, putUserVisit, deleteUserVisit, clearUserVisits, putUserMany } from './state/db';
 import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { pullRemote, pushRemote, deleteRemote, deleteAllRemote } from './state/cloud';
@@ -105,7 +105,7 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
     loadWorld('50m').finally(() => setLoading(false));
-    getAllVisits().then(setVisits).catch(() => {});
+    // Visits are loaded per-account on login; guests start empty and save nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -144,21 +144,19 @@ export default function App() {
   useEffect(() => {
     const uid = session?.user?.id ?? null;
     userIdRef.current = uid;
-    if (!uid) { syncedFor.current = null; return; }
+    if (!uid) { syncedFor.current = null; setVisits({}); return; } // guest / logged out = empty, nothing saved
     if (syncedFor.current === uid) return;
     syncedFor.current = uid;
     (async () => {
-      const remote = await pullRemote();
-      setVisits((prev) => {
-        const merged: VisitMap = { ...prev };
-        for (const [id, rv] of Object.entries(remote)) {
-          const cur = merged[id];
-          if (!cur || (rv.updatedAt ?? '') > (cur.updatedAt ?? '')) merged[id] = rv;
-        }
-        void putMany(merged);
-        void pushRemote(uid, merged);
-        return merged;
-      });
+      const [local, remote] = await Promise.all([getUserVisits(uid), pullRemote()]);
+      const merged: VisitMap = { ...local };
+      for (const [id, rv] of Object.entries(remote)) {
+        const cur = merged[id];
+        if (!cur || (rv.updatedAt ?? '') > (cur.updatedAt ?? '')) merged[id] = rv;
+      }
+      setVisits(merged);
+      void putUserMany(uid, merged);
+      void pushRemote(uid, merged);
     })();
   }, [session]);
 
@@ -264,15 +262,21 @@ export default function App() {
 
   const dtv = (s?: string) => (s ? (s.includes('T') ? s : `${s}T00:00`) : '');
 
+  // Persist helpers: write locally (scoped to the signed-in user) and let the
+  // debounced effect push to the cloud. Guests (no uid) save nothing.
+  function pLocal(id: string, v: Visit) { const u = userIdRef.current; if (u) void putUserVisit(u, id, v); }
+  function pDelete(id: string) { const u = userIdRef.current; if (u) { void deleteUserVisit(u, id); void deleteRemote(id); } }
+  function pMany(map: VisitMap) { const u = userIdRef.current; if (u) void putUserMany(u, map); }
+
   function setStatus(id: string, status: Status | null) {
     if (status === null) {
-      setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
-      if (userIdRef.current) void deleteRemote(id);
+      setVisits((prev) => { const c = { ...prev }; delete c[id]; return c; });
+      pDelete(id);
       return;
     }
     setVisits((prev) => {
       const next: Visit = { status, trips: prev[id]?.trips ?? [], updatedAt: new Date().toISOString() };
-      void putVisit(id, next);
+      pLocal(id, next);
       return { ...prev, [id]: next };
     });
   }
@@ -280,7 +284,7 @@ export default function App() {
     setVisits((prev) => {
       const cur = prev[id];
       const next: Visit = { status: cur?.status ?? 'visited', trips: fn(cur?.trips ?? []), updatedAt: new Date().toISOString() };
-      void putVisit(id, next);
+      pLocal(id, next);
       return { ...prev, [id]: next };
     });
   }
@@ -292,8 +296,8 @@ export default function App() {
   function clearAll() {
     if (window.confirm('Clear all marks? This cannot be undone.')) {
       setVisits({});
-      void clearVisits();
-      if (userIdRef.current) void deleteAllRemote();
+      const u = userIdRef.current;
+      if (u) { void clearUserVisits(u); void deleteAllRemote(); }
     }
   }
 
@@ -317,9 +321,10 @@ export default function App() {
   async function deleteAccount() {
     if (!supabase) return;
     if (!window.confirm('Delete your account data and sign out? Your marks are removed from the cloud. This cannot be undone.')) return;
+    const u = userIdRef.current;
     await deleteAllRemote();
+    if (u) void clearUserVisits(u);
     setVisits({});
-    void clearVisits();
     await supabase.auth.signOut();
     syncedFor.current = null;
     setProfileMsg('Account data deleted and signed out.');
@@ -339,7 +344,7 @@ export default function App() {
         const next: Visit = { status, trips, updatedAt: now };
         copy[id] = next; changed[id] = next;
       }
-      void putMany(changed);
+      pMany(changed);
       return copy;
     });
   }
@@ -364,7 +369,7 @@ export default function App() {
       };
       mark(c.id);
       if (r) mark(r.id);
-      void putMany(changed);
+      pMany(changed);
       return copy;
     });
     return c;
@@ -447,7 +452,7 @@ export default function App() {
             const cur = merged[id];
             if (!cur || (v.updatedAt ?? '') > (cur.updatedAt ?? '')) { merged[id] = v; changed[id] = v; }
           }
-          void putMany(changed);
+          pMany(changed);
           return merged;
         });
       } catch { window.alert('Could not read that file — expected a Scratch Globe export.'); }
@@ -590,7 +595,9 @@ export default function App() {
           {shareMsg && <div className="stat-label">{shareMsg}</div>}
         </div>
 
-        <div className="actions">
+        <div className="tools">
+          <div className="section-label">Tools</div>
+          <div className="actions">
           <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
           <button className="io" onClick={markLocation}>Mark my location</button>
           <button className={bgOn ? 'io bg-on' : 'io'} onClick={toggleBg}>Background GPS: {bgOn ? 'On' : 'Off'}</button>
@@ -605,6 +612,7 @@ export default function App() {
           </div>
           <button className="reset" onClick={clearAll}>Clear all marks</button>
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImportFile} />
+          </div>
         </div>
         <footer>{loading ? 'Loading globe…' : `${lod} · ${displayFeatures.length} shapes · zoom for regions`}</footer>
         <div className="credit">Boundaries: Natural Earth (public domain) · geoBoundaries (CC BY 4.0)</div>

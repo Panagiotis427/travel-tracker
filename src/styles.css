@@ -384,10 +384,24 @@ footer {
   border-color: var(--accent);
 }
 .actions {
-  margin-top: 4px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* consistent dividers between sidebar sections */
+.account,
+.people,
+.tools {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 2px;
+}
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 8px;
 }
 .io-row {
   display: flex;

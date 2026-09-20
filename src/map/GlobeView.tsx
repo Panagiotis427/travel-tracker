@@ -79,7 +79,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .polygonCapColor(capColor)
       .polygonSideColor(() => 'rgba(0,0,0,0)') // invisible sides = flat caps, no 3D walls
       .polygonStrokeColor(strokeColor)
-      .polygonAltitude(0.01)
+      .polygonAltitude(0.002)
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))
       .onPolygonHover((d: unknown) => {
         // No recolor here (that re-renders every polygon per hover = laggy).
@@ -94,6 +94,12 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     try { globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); } catch { /* ignore */ }
     // Flat, even lighting: no directional light means no dark hemisphere / "3D shadow".
     try { globe.lights([new AmbientLight(0xffffff, 2.6)]); } catch { /* ignore */ }
+    // Kill specular shine so the sphere looks like a flat map, not a glossy ball.
+    try {
+      const gm = globe.globeMaterial() as { shininess?: number; specular?: { set: (c: number) => void } };
+      gm.shininess = 0;
+      gm.specular?.set(0x000000);
+    } catch { /* ignore */ }
 
     const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
     controls.autoRotate = true;

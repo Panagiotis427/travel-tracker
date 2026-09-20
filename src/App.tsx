@@ -67,6 +67,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const [bgOn, setBgOn] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
@@ -256,6 +257,7 @@ export default function App() {
 
   function pick(id: string) {
     setSelectedId(id);
+    setMenuOpen(false); // close the mobile drawer so the globe is visible
     const f = featureById(id);
     if (f) setPov(focusOf(f.geometry));
   }
@@ -498,8 +500,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <h1>Scratch Globe</h1>
+      <button className="menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">☰</button>
+      {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
+      <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
+        <div className="sidebar-head">
+          <h1>Scratch Globe</h1>
+          <button className="menu-close" onClick={() => setMenuOpen(false)} aria-label="Close menu">×</button>
+        </div>
 
         <div className="stat">
           <div className="stat-big">{pct}%</div>

@@ -6,6 +6,7 @@
   "description": "Private $0 open-source polygon scratch-map travel tracker (web PWA; Android/desktop later).",
   "scripts": {
     "dev": "vite",
+    "dev:host": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -34,6 +35,7 @@
     "@types/geojson": "^7946.0.16",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/three": "^0.186.0",
     "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react": "^4.4.0",
     "typescript": "^5.8.0",

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import Globe from 'globe.gl';
 import type { GlobeInstance } from 'globe.gl';
+import { AmbientLight } from 'three';
 import type { CountryFeature } from './geo';
-import { featureName } from './geo';
 import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
 import type { Pov } from '../lib/geo-util';
@@ -56,7 +56,6 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       base = st ? STATUS_META[st].color : UNVISITED_COLOR;
     }
     if (id === selectedRef.current) return lighten(base, 0.4);
-    if (id === hoverRef.current) return lighten(base, 0.18);
     return base;
   };
   // Countries lie flat on the sphere at a constant tiny altitude: nothing rises,
@@ -81,21 +80,20 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .polygonSideColor(() => 'rgba(120,140,155,0.15)')
       .polygonStrokeColor(strokeColor)
       .polygonAltitude(0.01)
-      .polygonLabel((d: unknown) => {
-        const f = d as CountryFeature;
-        const st = statusesRef.current[idOf(f)];
-        return `<div style="font:600 13px system-ui;color:#fff">${featureName(f)}</div>
-                <div style="font:12px system-ui;color:#9fb4c2">${st ? STATUS_META[st].label : 'Tap to select'}</div>`;
-      })
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))
       .onPolygonHover((d: unknown) => {
+        // No recolor here (that re-renders every polygon per hover = laggy).
+        // The name shows in the HTML banner via onHover; only the cursor changes.
         hoverRef.current = d ? idOf(d) : null;
         el.style.cursor = d ? 'pointer' : 'grab';
         cbRef.current.onHover?.(hoverRef.current);
-        refresh();
       })
       .onGlobeClick(() => cbRef.current.onDeselect?.());
     globeRef.current = globe;
+    // Cap pixel ratio: full DPR on retina/4K quadruples fragment work for little gain.
+    try { globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); } catch { /* ignore */ }
+    // Flat, even lighting: no directional light means no dark hemisphere / "3D shadow".
+    try { globe.lights([new AmbientLight(0xffffff, 2.6)]); } catch { /* ignore */ }
 
     const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
     controls.autoRotate = true;

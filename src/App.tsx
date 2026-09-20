@@ -54,6 +54,7 @@ export default function App() {
   const [regions2, setRegions2] = useState<Record<string, CountryFeature[]>>({});
   const [expanded, setExpanded] = useState<Record<string, 1 | 2>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pov, setPov] = useState<Pov | null>(null);
   const [query, setQuery] = useState('');
   const [meta, setMeta] = useState<Record<string, CountryMeta>>({});
@@ -137,7 +138,10 @@ export default function App() {
       setExpanded((prev) => {
         const level: 1 | 2 = wantLevel === 2 && loaded2.current.has(a3) ? 2 : 1;
         const next: Record<string, 1 | 2> = { [a3]: level };
-        for (const [k, v] of Object.entries(prev).filter(([k2]) => k2 !== a3).slice(0, MAX_EXPANDED - 1)) next[k] = v;
+        // Keep at most one country at Admin-2 (counties are heavy); demote the rest.
+        for (const [k, v] of Object.entries(prev).filter(([k2]) => k2 !== a3).slice(0, MAX_EXPANDED - 1)) {
+          next[k] = level === 2 ? 1 : v;
+        }
         return next;
       });
     }, 180);
@@ -384,6 +388,8 @@ export default function App() {
     : '';
   const totalDur = selVisit ? fmtDuration(selVisit.trips.reduce((s, t) => s + (durationDays(t.start, t.end) ?? 0), 0)) : '';
   const compareOverlay = overlays.find((o) => o.id === compareId);
+  const hoveredFeature = !selectedFeature && hoveredId ? featureById(hoveredId) : null;
+  const bannerName = selectedFeature ? selName : hoveredFeature ? featureName(hoveredFeature) : '';
 
   return (
     <div className="app">
@@ -487,15 +493,15 @@ export default function App() {
       </aside>
 
       <main className="map-wrap">
-        {selectedFeature && (
+        {bannerName && (
           <div className="map-banner">
-            <span className="mb-name">{selName}</span>
-            {selVisit && <span className="mb-pill" style={{ background: STATUS_META[selVisit.status].color }}>{STATUS_META[selVisit.status].label}</span>}
-            <button className="mb-x" onClick={() => setSelectedId(null)} aria-label="Close">×</button>
+            <span className="mb-name">{bannerName}</span>
+            {selectedFeature && selVisit && <span className="mb-pill" style={{ background: STATUS_META[selVisit.status].color }}>{STATUS_META[selVisit.status].label}</span>}
+            {selectedFeature && <button className="mb-x" onClick={() => setSelectedId(null)} aria-label="Close">×</button>}
           </div>
         )}
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
         </Suspense>
       </main>
 

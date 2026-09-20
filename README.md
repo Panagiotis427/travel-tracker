@@ -21,6 +21,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Polish: day/night globe, marked-place labels, multiple trips, mark-my-location | Done |
 | Unified zoom-LOD (countries -> Admin-1 -> Admin-2), no drill modes | Done |
 | Multi-person share links + compare overlays (no backend) | Done |
+| Accounts + cloud sync (Supabase, optional) | Code done — add keys per `docs/SUPABASE.md` |
 | Deploy (GitHub Pages / Cloudflare) + Capacitor Android | Ready — see `docs/DEPLOY.md` |
 
 ## Run it

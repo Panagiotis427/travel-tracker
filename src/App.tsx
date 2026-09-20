@@ -10,6 +10,9 @@ import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getAllVisits, putVisit, deleteVisit, clearVisits, putMany } from './state/db';
+import { supabase, cloudEnabled } from './lib/supabase';
+import type { Session } from '@supabase/supabase-js';
+import { pullRemote, pushRemote, deleteRemote, deleteAllRemote } from './state/cloud';
 import type { AggMap } from './features/ImportPhotos';
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
@@ -65,12 +68,18 @@ export default function App() {
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPw, setAuthPw] = useState('');
+  const [authMsg, setAuthMsg] = useState<string | null>(null);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const lodTimer = useRef<number | null>(null);
   const loaded1 = useRef<Set<string>>(new Set());
   const loaded2 = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const userIdRef = useRef<string | null>(null);
+  const syncedFor = useRef<string | null>(null);
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
 
@@ -107,6 +116,44 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Track the auth session (persists on this device = "remember me").
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // On login: pull the user's cloud data, merge (last-write-wins), push the union.
+  useEffect(() => {
+    const uid = session?.user?.id ?? null;
+    userIdRef.current = uid;
+    if (!uid) { syncedFor.current = null; return; }
+    if (syncedFor.current === uid) return;
+    syncedFor.current = uid;
+    (async () => {
+      const remote = await pullRemote();
+      setVisits((prev) => {
+        const merged: VisitMap = { ...prev };
+        for (const [id, rv] of Object.entries(remote)) {
+          const cur = merged[id];
+          if (!cur || (rv.updatedAt ?? '') > (cur.updatedAt ?? '')) merged[id] = rv;
+        }
+        void putMany(merged);
+        void pushRemote(uid, merged);
+        return merged;
+      });
+    })();
+  }, [session]);
+
+  // Mirror local changes to the cloud (debounced) while logged in.
+  useEffect(() => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const t = window.setTimeout(() => void pushRemote(uid, visits), 800);
+    return () => window.clearTimeout(t);
+  }, [visits]);
 
   // Seamless LOD: swap admin-0 detail, then resolve the viewed country into
   // Admin-1 (zoom in) or Admin-2 (zoom in further); only a few kept expanded.
@@ -203,7 +250,11 @@ export default function App() {
   const dtv = (s?: string) => (s ? (s.includes('T') ? s : `${s}T00:00`) : '');
 
   function setStatus(id: string, status: Status | null) {
-    if (status === null) { setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; }); return; }
+    if (status === null) {
+      setVisits((prev) => { const c = { ...prev }; delete c[id]; void deleteVisit(id); return c; });
+      if (userIdRef.current) void deleteRemote(id);
+      return;
+    }
     setVisits((prev) => {
       const next: Visit = { status, trips: prev[id]?.trips ?? [], updatedAt: new Date().toISOString() };
       void putVisit(id, next);
@@ -223,7 +274,34 @@ export default function App() {
   const removeTrip = (id: string, i: number) => mutateTrips(id, (t) => t.filter((_, j) => j !== i));
 
   function resetView() { setSelectedId(null); setPov({ ...OVERVIEW }); }
-  function clearAll() { if (window.confirm('Clear all marks? This cannot be undone.')) { setVisits({}); void clearVisits(); } }
+  function clearAll() {
+    if (window.confirm('Clear all marks? This cannot be undone.')) {
+      setVisits({});
+      void clearVisits();
+      if (userIdRef.current) void deleteAllRemote();
+    }
+  }
+
+  async function login() {
+    if (!supabase) return;
+    setAuthMsg('Signing in…');
+    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPw });
+    setAuthMsg(error ? error.message : null);
+    if (!error) setAuthPw('');
+  }
+  async function signup() {
+    if (!supabase) return;
+    setAuthMsg('Creating account…');
+    const { error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPw });
+    setAuthMsg(error ? error.message : 'Account created. If email confirmation is on, confirm via the email, then log in.');
+    if (!error) setAuthPw('');
+  }
+  async function logout() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    syncedFor.current = null;
+    setAuthMsg(null);
+  }
 
   function applyImport(agg: AggMap) {
     setVisits((prev) => {
@@ -452,6 +530,28 @@ export default function App() {
           {STATUSES.map((s) => (<li key={s}><span className="swatch" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}<b>{stats.counts[s]}</b></li>))}
           <li><span className="swatch" style={{ background: UNVISITED_COLOR }} />Unvisited</li>
         </ul>
+
+        {cloudEnabled && (
+          <div className="account">
+            {session ? (
+              <div className="acct-in">
+                <span className="acct-email">{session.user.email}</span>
+                <button className="io" onClick={logout}>Log out</button>
+              </div>
+            ) : (
+              <>
+                <div className="people-head"><span>Account</span></div>
+                <input type="email" placeholder="Email" autoComplete="username" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+                <input type="password" placeholder="Password" autoComplete="current-password" value={authPw} onChange={(e) => setAuthPw(e.target.value)} />
+                <div className="io-row">
+                  <button className="io" onClick={login}>Log in</button>
+                  <button className="io" onClick={signup}>Sign up</button>
+                </div>
+              </>
+            )}
+            {authMsg && <div className="stat-label">{authMsg}</div>}
+          </div>
+        )}
 
         <div className="people">
           <div className="people-head"><span>People</span><button className="io" onClick={shareMine}>Share my map</button></div>

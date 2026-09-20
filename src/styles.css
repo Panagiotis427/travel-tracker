@@ -451,6 +451,34 @@ footer {
   cursor: pointer;
 }
 
+/* account / auth */
+.account {
+  margin-bottom: 16px;
+}
+.account input {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.acct-in {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.acct-email {
+  flex: 1;
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* visit fields (dates / duration / note) */
 .visit-fields {
   margin-top: 12px;

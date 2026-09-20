@@ -123,7 +123,13 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      if (event === 'PASSWORD_RECOVERY') {
+        const np = window.prompt('Enter a new password (at least 6 characters):');
+        if (np) void supabase!.auth.updateUser({ password: np }).then(({ error }) => window.alert(error ? error.message : 'Password updated.'));
+      }
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -307,6 +313,16 @@ export default function App() {
   function skipWelcome() {
     setShowAuth(false);
     try { localStorage.setItem(WELCOME_KEY, '1'); } catch { /* ignore */ }
+  }
+  async function deleteAccount() {
+    if (!supabase) return;
+    if (!window.confirm('Delete your account data and sign out? Your marks are removed from the cloud. This cannot be undone.')) return;
+    await deleteAllRemote();
+    setVisits({});
+    void clearVisits();
+    await supabase.auth.signOut();
+    syncedFor.current = null;
+    setProfileMsg('Account data deleted and signed out.');
   }
 
   function applyImport(agg: AggMap) {
@@ -546,6 +562,7 @@ export default function App() {
                   <button className="io" onClick={logout}>Log out</button>
                 </div>
                 <button className="io" onClick={changePassword}>Change password</button>
+                <button className="io danger" onClick={deleteAccount}>Delete account</button>
               </>
             ) : (
               <button className="io" onClick={() => setShowAuth(true)}>Sign in / Sign up</button>

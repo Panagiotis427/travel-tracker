@@ -31,6 +31,16 @@ export default function AuthScreen({ onSkip }: Props) {
     // On success the session listener in App closes this screen.
   }
 
+  async function reset() {
+    if (!supabase) return;
+    const em = email.trim() || window.prompt('Your account email:') || '';
+    if (!em) return;
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo: window.location.origin + window.location.pathname });
+    setBusy(false);
+    setMsg(error ? error.message : 'If that email has an account, a password-reset link is on its way.');
+  }
+
   return (
     <div className="auth-screen">
       <div className="auth-card">
@@ -46,6 +56,7 @@ export default function AuthScreen({ onSkip }: Props) {
         <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMsg(null); }}>
           {mode === 'login' ? 'New here? Create an account' : 'Have an account? Log in'}
         </button>
+        {mode === 'login' && <button className="auth-switch" onClick={reset} disabled={busy}>Forgot password?</button>}
 
         {msg && <div className="auth-msg">{msg}</div>}
 

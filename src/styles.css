@@ -410,6 +410,10 @@ footer {
   border-color: var(--accent);
   color: var(--accent);
 }
+.io.danger:hover {
+  border-color: #ff6b6b;
+  color: #ff9b9b;
+}
 
 /* people / sharing */
 .people {

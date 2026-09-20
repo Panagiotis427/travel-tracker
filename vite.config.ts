@@ -28,6 +28,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // New service worker takes over promptly on deploy (no more stale app).
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
         // Precache the shell + base globe so first offline load works; the big
         // three.js chunk fits under the limit. Detail layers + admin-1 + textures
         // are cached on demand at runtime instead of bloating the precache.

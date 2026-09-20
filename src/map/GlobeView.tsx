@@ -77,7 +77,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .atmosphereAltitude(0.18)
       .polygonsTransitionDuration(0)
       .polygonCapColor(capColor)
-      .polygonSideColor(() => 'rgba(120,140,155,0.15)')
+      .polygonSideColor(() => 'rgba(0,0,0,0)') // invisible sides = flat caps, no 3D walls
       .polygonStrokeColor(strokeColor)
       .polygonAltitude(0.01)
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))

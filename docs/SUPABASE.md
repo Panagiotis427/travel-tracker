@@ -79,6 +79,19 @@ repository secret** -> add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 The deploy workflow already passes them to the build; push (or re-run the workflow)
 and the live site gets login too.
 
+## Password reset
+The login screen has "Forgot password?" which emails a reset link. For the link to
+return to the app, add your URLs to the allowlist: Dashboard -> **Authentication ->
+URL Configuration** -> add the Site URL (the live GitHub Pages URL) and
+`http://localhost:5173`. Clicking the link reopens the app, which then prompts for a
+new password.
+
+## Deleting an account
+The in-app **Delete account** removes your data from the cloud and signs you out.
+Removing the login itself (the auth user) is done from the dashboard:
+**Authentication -> Users -> (row) -> Delete user**, or via a small Edge Function if
+you want it fully in-app later.
+
 ## Notes
 - "Remember me" is on by default: the session is stored on the device and survives
   reloads/reboots until you log out.

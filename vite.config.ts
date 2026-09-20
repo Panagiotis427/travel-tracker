@@ -6,6 +6,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 // Pages, inside a Capacitor Android wrapper, and as an installable desktop PWA.
 export default defineConfig({
   base: './',
+  server: { port: 5180, strictPort: false },
+  preview: { port: 4180, strictPort: false },
   plugins: [
     react(),
     VitePWA({

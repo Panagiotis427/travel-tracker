@@ -8,6 +8,7 @@
     "build": "node build-geo.mjs",
     "admin1": "node build-admin1.mjs",
     "admin2": "node build-admin2.mjs",
+    "cities": "node build-cities.mjs",
     "validate": "node validate.mjs",
     "all": "node build-geo.mjs && node validate.mjs"
   },

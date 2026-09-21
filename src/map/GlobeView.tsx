@@ -3,6 +3,7 @@ import Globe from 'globe.gl';
 import type { GlobeInstance } from 'globe.gl';
 import { AmbientLight } from 'three';
 import type { CountryFeature } from './geo';
+import type { CityMarker } from './cities';
 import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
 import type { Pov } from '../lib/geo-util';
@@ -28,20 +29,24 @@ interface Props {
   pov?: Pov | null;
   /** When set, overrides fill color per id (for compare/overlay views); null = unvisited. */
   colorOverride?: (id: string) => string | null;
+  /** Capital / city markers to draw (already zoom-filtered + capped by the caller). */
+  markers?: CityMarker[];
+  /** Click a marker -> select its parent country (by ADM0_A3). */
+  onMarkerPick?: (a3: string) => void;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
   const coRef = useRef(colorOverride);
-  const cbRef = useRef({ onPick, onDeselect, onHover, onZoom });
+  const cbRef = useRef({ onPick, onDeselect, onHover, onZoom, onMarkerPick });
   statusesRef.current = statuses;
   selectedRef.current = selectedId;
   coRef.current = colorOverride;
-  cbRef.current = { onPick, onDeselect, onHover, onZoom };
+  cbRef.current = { onPick, onDeselect, onHover, onZoom, onMarkerPick };
 
   const idOf = (d: unknown) => String((d as CountryFeature).id);
 
@@ -88,6 +93,21 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
         el.style.cursor = d ? 'pointer' : 'grab';
         cbRef.current.onHover?.(hoverRef.current);
       })
+      // City / capital markers: a dot plus (for the bigger ones) a name. Sat just
+      // above the country fill so it's never obscured, and — being a 3D object at
+      // surface radius — correctly hidden by the globe when it's on the far side.
+      .labelLat((d: unknown) => (d as CityMarker).y)
+      .labelLng((d: unknown) => (d as CityMarker).x)
+      .labelText((d: unknown) => ((d as CityMarker).t ? (d as CityMarker).n : ''))
+      .labelSize((d: unknown) => ((d as CityMarker).c ? 0.6 : 0.42))
+      .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.34 : 0.22))
+      .labelColor((d: unknown) => ((d as CityMarker).c ? '#ffd34d' : 'rgba(230,240,255,0.85)'))
+      .labelAltitude(0.012)
+      .labelResolution(2)
+      .labelIncludeDot(true)
+      .labelsTransitionDuration(0)
+      .onLabelClick((d: unknown) => { const a3 = (d as CityMarker).a3; if (a3) cbRef.current.onMarkerPick?.(a3); })
+      .onLabelHover((d: unknown) => { el.style.cursor = d ? 'pointer' : 'grab'; })
       .onGlobeClick(() => cbRef.current.onDeselect?.());
     globeRef.current = globe;
     // Cap pixel ratio: full DPR on retina/4K quadruples fragment work for little gain.
@@ -128,6 +148,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   }, []);
 
   useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
+  useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); }, [markers]);
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
   useEffect(() => { if (pov) globeRef.current?.pointOfView(pov, 800); }, [pov]);
   useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);

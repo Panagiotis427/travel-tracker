@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, ChangeEvent } from 'react';
 import { loadFeatures, loadAdmin1, loadAdmin2, featureName, isSovereign } from './map/geo';
 import type { CountryFeature } from './map/geo';
+import { loadCapitals, loadCities, selectMarkers, markerCap } from './map/cities';
+import type { CityMarker, MarkerMode } from './map/cities';
 import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
 import { focusOf } from './lib/geo-util';
 import type { Pov } from './lib/geo-util';
@@ -31,6 +33,7 @@ const A2_ALT = 0.32;     // resolve into Admin-2
 const MAX_EXPANDED = 6;
 const BG_KEY = 'travel-tracker:bg';
 const WELCOME_KEY = 'travel-tracker:welcome';
+const MARKER_KEY = 'travel-tracker:markers';
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
 
@@ -68,6 +71,13 @@ export default function App() {
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const [bgOn, setBgOn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [markerMode, setMarkerMode] = useState<MarkerMode>(() => {
+    try { const v = localStorage.getItem(MARKER_KEY); if (v === 'off' || v === 'capitals' || v === 'cities') return v; } catch { /* ignore */ }
+    return 'capitals';
+  });
+  const [zoomAlt, setZoomAlt] = useState<number>(OVERVIEW.altitude);
+  const [capitalsData, setCapitalsData] = useState<CityMarker[]>([]);
+  const [citiesData, setCitiesData] = useState<CityMarker[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
@@ -85,6 +95,7 @@ export default function App() {
   const syncedFor = useRef<string | null>(null);
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
+  const isMobile = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches, []);
 
   const mergeMeta = useCallback((feats: CountryFeature[]) => {
     setMeta((prev) => {
@@ -109,6 +120,22 @@ export default function App() {
     // Visits are loaded per-account on login; guests start empty and save nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // City / capital markers: load on demand (capitals tiny, cities lazy) and remember
+  // the user's choice on this device. This is a view preference, not travel data.
+  useEffect(() => {
+    if (markerMode !== 'off') {
+      loadCapitals().then(setCapitalsData).catch(() => { /* offline / not built */ });
+      if (markerMode === 'cities') loadCities().then(setCitiesData).catch(() => { /* ignore */ });
+    }
+    try { localStorage.setItem(MARKER_KEY, markerMode); } catch { /* ignore */ }
+  }, [markerMode]);
+
+  const visibleMarkers = useMemo(() => {
+    if (markerMode === 'off') return [];
+    const pool = markerMode === 'cities' ? citiesData : capitalsData;
+    return selectMarkers(pool, zoomAlt, markerCap(zoomAlt, isMobile));
+  }, [markerMode, citiesData, capitalsData, zoomAlt, isMobile]);
 
   // Import a shared map from the URL hash (#s=...) once on load.
   useEffect(() => {
@@ -174,6 +201,7 @@ export default function App() {
   function onZoom(p: Pov) {
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
     lodTimer.current = window.setTimeout(async () => {
+      setZoomAlt(p.altitude); // drives city-marker density (reveal more as you zoom)
       // 3-tier LOD: light 110m at world view, sharper 50m mid-zoom, 10m up close.
       const wantLod: Lod = p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
@@ -614,6 +642,9 @@ export default function App() {
             <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>{theme === 'dark' ? 'Day globe' : 'Night globe'}</button>
             <button className="io" onClick={resetView}>Reset view</button>
           </div>
+          <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'capitals' : m === 'capitals' ? 'cities' : 'off'))}>
+            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'capitals' ? 'Capitals' : 'All'}
+          </button>
           <div className="io-row">
             <button className="io" onClick={exportJson}>Export JSON</button>
             <button className="io" onClick={() => fileRef.current?.click()}>Import JSON</button>
@@ -635,7 +666,7 @@ export default function App() {
           </div>
         )}
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} />
         </Suspense>
       </main>
 

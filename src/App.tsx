@@ -17,6 +17,7 @@ import type { Session } from '@supabase/supabase-js';
 import { pullRemote, pushRemote, deleteRemote, deleteAllRemote } from './state/cloud';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
+import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
@@ -34,6 +35,8 @@ const MAX_EXPANDED = 6;
 const BG_KEY = 'travel-tracker:bg';
 const WELCOME_KEY = 'travel-tracker:welcome';
 const MARKER_KEY = 'travel-tracker:markers';
+const COUNTIES_KEY = 'travel-tracker:counties';
+const VIEW_KEY = 'travel-tracker:view';
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
 
@@ -77,6 +80,8 @@ export default function App() {
     return 'selected';
   });
   const [zoomAlt, setZoomAlt] = useState<number>(OVERVIEW.altitude);
+  const [countiesOn, setCountiesOn] = useState<boolean>(() => { try { return localStorage.getItem(COUNTIES_KEY) === '1'; } catch { return false; } });
+  const [viewMode, setViewMode] = useState<'globe' | 'flat'>(() => { try { return localStorage.getItem(VIEW_KEY) === 'flat' ? 'flat' : 'globe'; } catch { return 'globe'; } });
   const [citiesData, setCitiesData] = useState<CityMarker[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [compareId, setCompareId] = useState<string | null>(null);
@@ -126,6 +131,14 @@ export default function App() {
   // preference, not travel data). Fetch the data only when it will actually be
   // shown — in 'selected' mode that's not until a country is picked.
   useEffect(() => { try { localStorage.setItem(MARKER_KEY, markerMode); } catch { /* ignore */ } }, [markerMode]);
+  useEffect(() => {
+    try { localStorage.setItem(COUNTIES_KEY, countiesOn ? '1' : '0'); } catch { /* ignore */ }
+    if (!countiesOn) setExpanded((e) => { // drop any counties already on screen
+      let ch = false; const n: Record<string, 1 | 2> = { ...e };
+      for (const k in n) if (n[k] === 2) { n[k] = 1; ch = true; }
+      return ch ? n : e;
+    });
+  }, [countiesOn]);
 
   // Every country the user has marked (any status); region ids -> parent country a3.
   const markedA3 = useMemo(() => new Set(Object.keys(visits).map((id) => id.split('-')[0])), [visits]);
@@ -134,6 +147,19 @@ export default function App() {
     const need = markerMode === 'all' || (markerMode === 'selected' && (!!selectedA3 || markedA3.size > 0));
     if (need && !citiesData.length) loadCities().then(setCitiesData).catch(() => { /* offline / not built */ });
   }, [markerMode, selectedA3, markedA3.size, citiesData.length]);
+
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, viewMode); } catch { /* ignore */ } }, [viewMode]);
+
+  // Marker pool for the 2D map: same selection logic but NOT zoom-gated (the flat view
+  // does its own zoom/declutter cheaply on canvas).
+  const flatMarkerPool = useMemo(() => {
+    if (markerMode === 'off' || !citiesData.length) return [];
+    if (markerMode === 'selected') {
+      if (!selectedA3 && markedA3.size === 0) return [];
+      return citiesData.filter((m) => m.a3 === selectedA3 || markedA3.has(m.a3));
+    }
+    return citiesData;
+  }, [markerMode, citiesData, selectedA3, markedA3]);
 
   const visibleMarkers = useMemo(() => {
     if (markerMode === 'off' || !citiesData.length) return [];
@@ -218,7 +244,9 @@ export default function App() {
       const wantLod: Lod = p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
 
-      const wantLevel = p.altitude < A2_ALT ? 2 : p.altitude < EXPAND_ALT ? 1 : 0;
+      // Admin-2 (counties) is opt-in: building thousands of county polygons is the one
+      // heavy transition, so normal zoom stops at Admin-1 unless the user turns it on.
+      const wantLevel = countiesOn && p.altitude < A2_ALT ? 2 : p.altitude < EXPAND_ALT ? 1 : 0;
       if (wantLevel === 0) { setExpanded((e) => (Object.keys(e).length ? {} : e)); return; }
 
       await initCountryIndex();
@@ -651,12 +679,20 @@ export default function App() {
           <button className={bgOn ? 'io bg-on' : 'io'} onClick={toggleBg}>Background GPS: {bgOn ? 'On' : 'Off'}</button>
           {geoMsg && <div className="stat-label geo-msg">{geoMsg}</div>}
           <div className="io-row">
-            <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>{theme === 'dark' ? 'Day globe' : 'Night globe'}</button>
+            <button className="io" onClick={() => setViewMode((v) => (v === 'globe' ? 'flat' : 'globe'))}>View: {viewMode === 'globe' ? '3D globe' : '2D map'}</button>
             <button className="io" onClick={resetView}>Reset view</button>
           </div>
-          <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'selected' : m === 'selected' ? 'all' : 'off'))}>
-            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'selected' ? 'Marked + picked' : 'Everywhere'}
-          </button>
+          {viewMode === 'globe' && (
+            <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>{theme === 'dark' ? 'Day globe' : 'Night globe'}</button>
+          )}
+          <div className="io-row">
+            <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'selected' : m === 'selected' ? 'all' : 'off'))}>
+              Cities: {markerMode === 'off' ? 'Off' : markerMode === 'selected' ? 'Marked + picked' : 'Everywhere'}
+            </button>
+            <button className={countiesOn ? 'io bg-on' : 'io'} onClick={() => setCountiesOn((v) => !v)}>
+              Counties: {countiesOn ? 'On' : 'Off'}
+            </button>
+          </div>
           <div className="io-row">
             <button className="io" onClick={exportJson}>Export JSON</button>
             <button className="io" onClick={() => fileRef.current?.click()}>Import JSON</button>
@@ -677,9 +713,13 @@ export default function App() {
             {selectedFeature && <button className="mb-x" onClick={() => setSelectedId(null)} aria-label="Close">×</button>}
           </div>
         )}
-        <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
-        </Suspense>
+        {viewMode === 'globe' ? (
+          <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
+            <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
+          </Suspense>
+        ) : (
+          <FlatMapView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} onPick={pick} onDeselect={() => setSelectedId(null)} colorOverride={colorOverride} markers={flatMarkerPool} onView={onZoom} />
+        )}
       </main>
 
       {showImport && (

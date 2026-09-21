@@ -37,9 +37,11 @@ interface Props {
   fit?: Bounds | null;
   /** Current camera altitude, so marker size can track the live zoom level. */
   viewAltitude?: number;
+  /** Country (ADM0_A3) to emphasise: its markers full size, other marked ones smaller. */
+  emphasizeA3?: string | null;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick, fit, viewAltitude }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick, fit, viewAltitude, emphasizeA3 }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const maxAltRef = useRef<number>(2.5);
@@ -110,7 +112,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .labelSize((d: unknown) => ((d as CityMarker).c ? 0.4 : 0.28))
       .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.1 : 0.065))
       .labelColor((d: unknown) => ((d as CityMarker).c ? '#fb4b60' : '#ffe14d'))
-      .labelAltitude(0.012)
+      .labelAltitude(0.005)
       .labelResolution(2)
       .labelIncludeDot(true)
       .labelsTransitionDuration(0)
@@ -187,9 +189,11 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const g = globeRef.current;
     if (!g) return;
     const a = Math.max(0.08, Math.min(viewAltitude ?? 1, 2.5));
-    g.labelSize((d: unknown) => ((d as CityMarker).c ? 1.15 : 0.82) * a)
-     .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.32 : 0.2) * a);
-  }, [viewAltitude]);
+    // Emphasise the picked country; other marked countries stay as smaller context.
+    const emph = (d: unknown) => (emphasizeA3 && (d as CityMarker).a3 !== emphasizeA3 ? 0.72 : 1);
+    g.labelSize((d: unknown) => ((d as CityMarker).c ? 1.15 : 0.82) * a * emph(d))
+     .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.32 : 0.2) * a * emph(d));
+  }, [viewAltitude, emphasizeA3]);
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
   useEffect(() => { if (pov) globeRef.current?.pointOfView({ ...pov, altitude: Math.min(pov.altitude, maxAltRef.current) }, 800); }, [pov]);
   // Fit a selected area to the viewport: turn its angular size + the camera's field

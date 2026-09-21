@@ -22,7 +22,7 @@ const SRC = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/mast
 
 const CITY_MAX_RANK = 7; // drop the long tail of tiny villages (ranks 8-10)
 
-function r2(n) { return Math.round(n * 100) / 100; }
+function r3(n) { return Math.round(n * 1000) / 1000; } // ~110 m precision
 
 async function sizeKB(p) {
   try { return `${((await stat(p)).size / 1024).toFixed(0)} KB`; } catch { return '?'; }
@@ -54,8 +54,8 @@ async function main() {
     const cap = p.ADM0CAP === 1 || p.ADM0CAP === '1' || /Admin-0 capital/i.test(String(p.FEATURECLA ?? ''));
     rows.push({
       n: name,
-      y: r2(+coord[1]),
-      x: r2(+coord[0]),
+      y: r3(+coord[1]),
+      x: r3(+coord[0]),
       r: Number.isFinite(+p.SCALERANK) ? +p.SCALERANK : 10,
       p: Math.round(+p.POP_MAX || +p.POP_MIN || 0),
       c: cap ? 1 : 0,

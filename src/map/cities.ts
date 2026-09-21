@@ -66,6 +66,6 @@ export function selectMarkers(pool: CityMarker[], alt: number, cap: number): Cit
 /** How many markers to draw at once, kept lower on phones. */
 export function markerCap(alt: number, mobile: boolean): number {
   const near = alt < 0.9;
-  if (mobile) return near ? 90 : 22;
+  if (mobile) return near ? 48 : 14; // fewer label meshes on phones (each is a draw call)
   return near ? 160 : 40;
 }

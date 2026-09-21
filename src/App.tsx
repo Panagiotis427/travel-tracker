@@ -5,6 +5,7 @@ import type { CountryFeature } from './map/geo';
 import { loadCities, selectMarkers, markerCap } from './map/cities';
 import type { CityMarker, MarkerMode } from './map/cities';
 import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
+import { bboxOf } from './map/pip';
 import { boundsOf } from './lib/geo-util';
 import type { Pov, Bounds } from './lib/geo-util';
 import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates';
@@ -35,7 +36,7 @@ const MAX_EXPANDED = 6;
 const BG_KEY = 'travel-tracker:bg';
 const WELCOME_KEY = 'travel-tracker:welcome';
 const MARKER_KEY = 'travel-tracker:markers';
-const COUNTIES_KEY = 'travel-tracker:counties';
+const COUNTIES_KEY = 'travel-tracker:counties2'; // v2: default ON now that counties are viewport-culled
 const VIEW_KEY = 'travel-tracker:view';
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
@@ -80,7 +81,8 @@ export default function App() {
     return 'selected';
   });
   const [zoomAlt, setZoomAlt] = useState<number>(OVERVIEW.altitude);
-  const [countiesOn, setCountiesOn] = useState<boolean>(() => { try { return localStorage.getItem(COUNTIES_KEY) === '1'; } catch { return false; } });
+  const [viewCenter, setViewCenter] = useState<{ lat: number; lng: number }>({ lat: 20, lng: 0 });
+  const [countiesOn, setCountiesOn] = useState<boolean>(() => { try { return localStorage.getItem(COUNTIES_KEY) !== '0'; } catch { return true; } });
   const [viewMode, setViewMode] = useState<'globe' | 'flat'>(() => { try { return localStorage.getItem(VIEW_KEY) === 'flat' ? 'flat' : 'globe'; } catch { return 'globe'; } });
   const [citiesData, setCitiesData] = useState<CityMarker[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
@@ -92,6 +94,7 @@ export default function App() {
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
+  const bboxCache = useRef<Map<string, [number, number, number, number]>>(new Map());
   const lodTimer = useRef<number | null>(null);
   const loaded1 = useRef<Set<string>>(new Set());
   const loaded2 = useRef<Set<string>>(new Set());
@@ -240,8 +243,12 @@ export default function App() {
       // Drives city-marker density + size. Hysteresis: ignore <6% zoom changes so we
       // don't rebuild every label's (expensive) text geometry on tiny nudges.
       setZoomAlt((prev) => (Math.abs(p.altitude - prev) / Math.max(prev, 0.001) > 0.06 ? p.altitude : prev));
+      // Track view centre (for county viewport-culling); ignore <1 degree drift.
+      setViewCenter((prev) => (Math.abs(prev.lat - p.lat) + Math.abs(prev.lng - p.lng) > 1 ? { lat: p.lat, lng: p.lng } : prev));
       // 3-tier LOD: light 110m at world view, sharper 50m mid-zoom, 10m up close.
-      const wantLod: Lod = p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
+      // Phones skip the heavy 10m base world (~2x the vertices) = fewer triangles/frame;
+      // the focused country still gets sharp Admin-1/2 detail on top.
+      const wantLod: Lod = !isMobile && p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
 
       // Admin-2 (counties) is opt-in: building thousands of county polygons is the one
@@ -287,7 +294,27 @@ export default function App() {
       else out.push(f);
     }
     return out;
+    // NOTE: no view deps here -> identity is stable while dragging = no polygon rebuild.
   }, [worldFeatures, expanded, regions1, regions2]);
+
+  // Only a huge expanded county set is worth viewport-culling. When it is, `renderFeatures`
+  // tracks the view (rebuilds on pan, but a small on-screen subset); otherwise it IS
+  // displayFeatures (same reference), so ordinary dragging never rebuilds geometry.
+  const cullActive = useMemo(
+    () => Object.entries(expanded).some(([a3, lvl]) => lvl === 2 && (regions2[a3]?.length ?? 0) > 400),
+    [expanded, regions2],
+  );
+  const renderFeatures = useMemo(() => {
+    if (!cullActive) return displayFeatures;
+    const hLat = Math.min(zoomAlt * 32 + 1.5, 90);
+    const hLng = hLat / Math.max(0.2, Math.cos((viewCenter.lat * Math.PI) / 180));
+    return displayFeatures.filter((f) => {
+      if (!f.id.includes('-2-')) return true; // cull only admin-2 (county) polygons
+      let bb = bboxCache.current.get(f.id);
+      if (!bb) { bb = bboxOf(f.geometry); bboxCache.current.set(f.id, bb); }
+      return !(bb[2] < viewCenter.lng - hLng || bb[0] > viewCenter.lng + hLng || bb[3] < viewCenter.lat - hLat || bb[1] > viewCenter.lat + hLat);
+    });
+  }, [displayFeatures, cullActive, zoomAlt, viewCenter]);
 
   const statuses = useMemo(() => {
     const m: StatusMap = {};
@@ -701,7 +728,7 @@ export default function App() {
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImportFile} />
           </div>
         </div>
-        <footer>{loading ? 'Loading globe…' : `${lod} · ${displayFeatures.length} shapes · zoom for regions`}</footer>
+        <footer>{loading ? 'Loading globe…' : `${lod} · ${renderFeatures.length} shapes · zoom for regions`}</footer>
         <div className="credit">Boundaries: Natural Earth (public domain) · geoBoundaries (CC BY 4.0)</div>
       </aside>
 
@@ -715,10 +742,10 @@ export default function App() {
         )}
         {viewMode === 'globe' ? (
           <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-            <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
+            <GlobeView polygons={renderFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
           </Suspense>
         ) : (
-          <FlatMapView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} onPick={pick} onDeselect={() => setSelectedId(null)} colorOverride={colorOverride} markers={flatMarkerPool} onView={onZoom} />
+          <FlatMapView polygons={renderFeatures} statuses={statuses} selectedId={selectedId} onPick={pick} onDeselect={() => setSelectedId(null)} colorOverride={colorOverride} markers={flatMarkerPool} onView={onZoom} />
         )}
       </main>
 

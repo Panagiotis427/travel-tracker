@@ -46,6 +46,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   const globeRef = useRef<GlobeInstance | null>(null);
   const maxAltRef = useRef<number>(2.5);
   const wakeRef = useRef<((ms?: number) => void) | null>(null);
+  const labelDataRef = useRef<CityMarker[]>([]);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
@@ -82,13 +83,14 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
 
   useEffect(() => {
     const el = elRef.current!;
+    const isMobileGl = window.matchMedia?.('(max-width: 720px)').matches ?? false;
     // logarithmicDepthBuffer stops the country polygons (which sit a hair above the
     // globe surface) from z-fighting the texture as the camera moves — that was the
     // shifting dark speckle. antialias smooths the polygon/label edges too.
     const globe: GlobeInstance = new Globe(el, { rendererConfig: { antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' } })
       .backgroundColor('#0b1f2a')
       .globeImageUrl(globeImage)
-      .showAtmosphere(true)
+      .showAtmosphere(!isMobileGl) // the atmosphere glow is extra per-frame fill; drop it on phones
       .atmosphereColor('#4aa8ff')
       .atmosphereAltitude(0.18)
       .polygonsTransitionDuration(0)
@@ -165,8 +167,24 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     wakeRef.current = wake;
     const onChange = () => wake();
     controls.addEventListener?.('change', onChange); // fires each frame during drag/zoom/damping
-    const onPointerDown = () => { controls.autoRotate = false; wake(); };
+    // On phones, hide marker labels while dragging: each label is a draw call, so many of
+    // them stutter the drag. Restore on release (a brief rebuild, but the drag is smooth).
+    let labelsHidden = false;
+    const hideLabels = () => {
+      if (labelsHidden || !isMobileGl || labelDataRef.current.length <= 16) return;
+      labelsHidden = true;
+      globe.labelsData([] as unknown as object[]);
+    };
+    const restoreLabels = () => {
+      if (!labelsHidden) return;
+      labelsHidden = false;
+      globe.labelsData(labelDataRef.current as unknown as object[]);
+      wake();
+    };
+    const onPointerDown = () => { controls.autoRotate = false; hideLabels(); wake(); };
     el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', restoreLabels);
+    window.addEventListener('pointercancel', restoreLabels);
 
     const radius = () => (globe as unknown as { getGlobeRadius?: () => number }).getGlobeRadius?.() ?? 100;
     // Clamp zoom-out so Earth can never shrink to a dot: cap distance just past the
@@ -201,6 +219,8 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       clearTimeout(idleTimer);
       controls.removeEventListener?.('change', onChange);
       el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', restoreLabels);
+      window.removeEventListener('pointercancel', restoreLabels);
       (globe as unknown as { _destructor?: () => void })._destructor?.();
       globeRef.current = null;
       wakeRef.current = null;
@@ -210,7 +230,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   }, []);
 
   useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); wakeRef.current?.(); }, [polygons]);
-  useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); wakeRef.current?.(); }, [markers]);
+  useEffect(() => { labelDataRef.current = markers ?? []; globeRef.current?.labelsData((markers ?? []) as unknown as object[]); wakeRef.current?.(); }, [markers]);
   // Marker size tracks the live zoom. Labels are 3D (perspective-scaled), so to keep
   // them a roughly constant, legible size on screen at every zoom their world size
   // must scale with camera altitude (screen size ~ worldSize / distance). Re-applied

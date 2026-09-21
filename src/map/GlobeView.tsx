@@ -45,6 +45,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const maxAltRef = useRef<number>(2.5);
+  const wakeRef = useRef<((ms?: number) => void) | null>(null);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
@@ -120,8 +121,13 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .onLabelHover((d: unknown) => { el.style.cursor = d ? 'pointer' : 'grab'; })
       .onGlobeClick(() => cbRef.current.onDeselect?.());
     globeRef.current = globe;
-    // Cap pixel ratio: full DPR on retina/4K quadruples fragment work for little gain.
-    try { globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); } catch { /* ignore */ }
+    // Cap pixel ratio: fragment work scales with its SQUARE. Phones are fill-rate
+    // bound and often report DPR 2-3, so cap to 1 on small screens (big win, antialias
+    // still smooths edges); 1.5 on desktop.
+    try {
+      const dprCap = window.matchMedia?.('(max-width: 720px)').matches ? 1 : 1.5;
+      globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, dprCap));
+    } catch { /* ignore */ }
     // Flat, even lighting: no directional light means no dark hemisphere / "3D shadow".
     try { globe.lights([new AmbientLight(0xffffff, 2.6)]); } catch { /* ignore */ }
     // Kill specular shine so the sphere looks like a flat map, not a glossy ball.
@@ -134,14 +140,32 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const controls = globe.controls() as {
       autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean;
       minDistance: number; maxDistance: number; update?: () => void;
+      addEventListener?: (t: string, fn: () => void) => void;
+      removeEventListener?: (t: string, fn: () => void) => void;
     };
     // Respect "reduce motion": don't auto-spin (also easier on phone battery/CPU).
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     controls.autoRotate = !reduceMotion;
     controls.autoRotateSpeed = 0.35;
     controls.enableDamping = true;
-    const stopSpin = () => { controls.autoRotate = false; };
-    el.addEventListener('pointerdown', stopSpin, { once: true });
+
+    // RENDER-ON-DEMAND. globe.gl otherwise runs its requestAnimationFrame loop forever,
+    // rendering ~60fps even when nothing moves — constant GPU/battery. Instead: run only
+    // while something is actually changing (interaction, damping tail, auto-spin, or a
+    // programmatic update), then pause. Idle cost drops to zero, so the device stays cool
+    // and doesn't thermal-throttle -> everything else feels faster.
+    const anim = globe as unknown as { pauseAnimation?: () => void; resumeAnimation?: () => void };
+    let idleTimer = 0;
+    const wake = (ms = 700) => {
+      anim.resumeAnimation?.();
+      clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => { if (!controls.autoRotate) anim.pauseAnimation?.(); }, ms);
+    };
+    wakeRef.current = wake;
+    const onChange = () => wake();
+    controls.addEventListener?.('change', onChange); // fires each frame during drag/zoom/damping
+    const onPointerDown = () => { controls.autoRotate = false; wake(); };
+    el.addEventListener('pointerdown', onPointerDown);
 
     const radius = () => (globe as unknown as { getGlobeRadius?: () => number }).getGlobeRadius?.() ?? 100;
     // Clamp zoom-out so Earth can never shrink to a dot: cap distance just past the
@@ -164,23 +188,28 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
 
     globe.onZoom((p: Pov) => cbRef.current.onZoom?.(p));
 
-    const resize = () => { globe.width(el.clientWidth).height(el.clientHeight); applyZoomLimits(); };
+    const resize = () => { globe.width(el.clientWidth).height(el.clientHeight); applyZoomLimits(); wake(); };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(el);
 
+    wake(2500); // render the initial frames (incl. async texture) then settle to idle
+
     return () => {
       ro.disconnect();
-      el.removeEventListener('pointerdown', stopSpin);
+      clearTimeout(idleTimer);
+      controls.removeEventListener?.('change', onChange);
+      el.removeEventListener('pointerdown', onPointerDown);
       (globe as unknown as { _destructor?: () => void })._destructor?.();
       globeRef.current = null;
+      wakeRef.current = null;
       el.innerHTML = '';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
-  useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); }, [markers]);
+  useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); wakeRef.current?.(); }, [polygons]);
+  useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); wakeRef.current?.(); }, [markers]);
   // Marker size tracks the live zoom. Labels are 3D (perspective-scaled), so to keep
   // them a roughly constant, legible size on screen at every zoom their world size
   // must scale with camera altitude (screen size ~ worldSize / distance). Re-applied
@@ -193,9 +222,10 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const emph = (d: unknown) => (emphasizeA3 && (d as CityMarker).a3 !== emphasizeA3 ? 0.72 : 1);
     g.labelSize((d: unknown) => ((d as CityMarker).c ? 1.15 : 0.82) * a * emph(d))
      .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.32 : 0.2) * a * emph(d));
+    wakeRef.current?.();
   }, [viewAltitude, emphasizeA3]);
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
-  useEffect(() => { if (pov) globeRef.current?.pointOfView({ ...pov, altitude: Math.min(pov.altitude, maxAltRef.current) }, 800); }, [pov]);
+  useEffect(() => { refresh(); wakeRef.current?.(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
+  useEffect(() => { if (pov) { globeRef.current?.pointOfView({ ...pov, altitude: Math.min(pov.altitude, maxAltRef.current) }, 800); wakeRef.current?.(900); } }, [pov]);
   // Fit a selected area to the viewport: turn its angular size + the camera's field
   // of view into the altitude at which it just fills the screen (per-axis, so a wide
   // country on a tall phone still fits), then fly there.
@@ -216,8 +246,9 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     };
     const alt = Math.max(fitAlt(fit.h, vfov / 2), fitAlt(fit.w, hfov / 2)) * 1.12;
     globe.pointOfView({ lat: fit.lat, lng: fit.lng, altitude: Math.max(0.08, Math.min(alt, maxAltRef.current)) }, 800);
+    wakeRef.current?.(900);
   }, [fit]);
-  useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
+  useEffect(() => { globeRef.current?.globeImageUrl(globeImage); wakeRef.current?.(2500); }, [globeImage]);
 
   return <div ref={elRef} className="globe-wrap" />;
 }

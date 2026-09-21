@@ -211,7 +211,9 @@ export default function App() {
   function onZoom(p: Pov) {
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
     lodTimer.current = window.setTimeout(async () => {
-      setZoomAlt(p.altitude); // drives city-marker density (reveal more as you zoom)
+      // Drives city-marker density + size. Hysteresis: ignore <6% zoom changes so we
+      // don't rebuild every label's (expensive) text geometry on tiny nudges.
+      setZoomAlt((prev) => (Math.abs(p.altitude - prev) / Math.max(prev, 0.001) > 0.06 ? p.altitude : prev));
       // 3-tier LOD: light 110m at world view, sharper 50m mid-zoom, 10m up close.
       const wantLod: Lod = p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });

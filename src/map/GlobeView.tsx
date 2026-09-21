@@ -112,7 +112,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .labelSize((d: unknown) => ((d as CityMarker).c ? 0.4 : 0.28))
       .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.1 : 0.065))
       .labelColor((d: unknown) => ((d as CityMarker).c ? '#fb4b60' : '#ffe14d'))
-      .labelAltitude(0.005)
+      .labelAltitude(0.003) // just above the country fill (0.002): minimal radial lift = minimal off-axis parallax = dot sits on its true point
       .labelResolution(2)
       .labelIncludeDot(true)
       .labelsTransitionDuration(0)

@@ -5,8 +5,8 @@ import type { CountryFeature } from './map/geo';
 import { loadCities, selectMarkers, markerCap } from './map/cities';
 import type { CityMarker, MarkerMode } from './map/cities';
 import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
-import { focusOf } from './lib/geo-util';
-import type { Pov } from './lib/geo-util';
+import { boundsOf } from './lib/geo-util';
+import type { Pov, Bounds } from './lib/geo-util';
 import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates';
 import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
@@ -64,6 +64,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pov, setPov] = useState<Pov | null>(null);
+  const [fit, setFit] = useState<Bounds | null>(null);
   const [query, setQuery] = useState('');
   const [meta, setMeta] = useState<Record<string, CountryMeta>>({});
   const [loading, setLoading] = useState(true);
@@ -125,20 +126,26 @@ export default function App() {
   // preference, not travel data). Fetch the data only when it will actually be
   // shown — in 'selected' mode that's not until a country is picked.
   useEffect(() => { try { localStorage.setItem(MARKER_KEY, markerMode); } catch { /* ignore */ } }, [markerMode]);
+
+  // Every country the user has marked (any status); region ids -> parent country a3.
+  const markedA3 = useMemo(() => new Set(Object.keys(visits).map((id) => id.split('-')[0])), [visits]);
+
   useEffect(() => {
-    const need = markerMode === 'all' || (markerMode === 'selected' && !!selectedA3);
+    const need = markerMode === 'all' || (markerMode === 'selected' && (!!selectedA3 || markedA3.size > 0));
     if (need && !citiesData.length) loadCities().then(setCitiesData).catch(() => { /* offline / not built */ });
-  }, [markerMode, selectedA3, citiesData.length]);
+  }, [markerMode, selectedA3, markedA3.size, citiesData.length]);
 
   const visibleMarkers = useMemo(() => {
     if (markerMode === 'off' || !citiesData.length) return [];
     if (markerMode === 'selected') {
-      if (!selectedA3) return [];
-      const sub = citiesData.filter((m) => m.a3 === selectedA3);
-      return selectMarkers(sub, zoomAlt, markerCap(zoomAlt, isMobile));
+      // The picked country PLUS every marked place, so your travels always show cities.
+      if (!selectedA3 && markedA3.size === 0) return [];
+      const sub = citiesData.filter((m) => m.a3 === selectedA3 || markedA3.has(m.a3));
+      const cap = Math.min(260, Math.max(markerCap(zoomAlt, isMobile), markedA3.size + 12));
+      return selectMarkers(sub, zoomAlt, cap);
     }
     return selectMarkers(citiesData, zoomAlt, markerCap(zoomAlt, isMobile));
-  }, [markerMode, citiesData, selectedA3, zoomAlt, isMobile]);
+  }, [markerMode, citiesData, selectedA3, markedA3, zoomAlt, isMobile]);
 
   // Import a shared map from the URL hash (#s=...) once on load.
   useEffect(() => {
@@ -291,7 +298,7 @@ export default function App() {
     setSelectedId(id);
     setMenuOpen(false); // close the mobile drawer so the globe is visible
     const f = featureById(id);
-    if (f) setPov(focusOf(f.geometry));
+    if (f) setFit(boundsOf(f.geometry)); // fly + fit the area to the viewport
   }
 
   const dtv = (s?: string) => (s ? (s.includes('T') ? s : `${s}T00:00`) : '');
@@ -326,7 +333,7 @@ export default function App() {
   const updateTrip = (id: string, i: number, patch: Partial<Trip>) => mutateTrips(id, (t) => t.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const removeTrip = (id: string, i: number) => mutateTrips(id, (t) => t.filter((_, j) => j !== i));
 
-  function resetView() { setSelectedId(null); setPov({ ...OVERVIEW }); }
+  function resetView() { setSelectedId(null); setFit(null); setPov({ ...OVERVIEW }); }
   function clearAll() {
     if (window.confirm('Clear all marks? This cannot be undone.')) {
       setVisits({});
@@ -646,7 +653,7 @@ export default function App() {
             <button className="io" onClick={resetView}>Reset view</button>
           </div>
           <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'selected' : m === 'selected' ? 'all' : 'off'))}>
-            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'selected' ? 'This country' : 'Everywhere'}
+            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'selected' ? 'Marked + picked' : 'Everywhere'}
           </button>
           <div className="io-row">
             <button className="io" onClick={exportJson}>Export JSON</button>
@@ -669,7 +676,7 @@ export default function App() {
           </div>
         )}
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} />
         </Suspense>
       </main>
 

@@ -6,7 +6,7 @@ import type { CountryFeature } from './geo';
 import type { CityMarker } from './cities';
 import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
-import type { Pov } from '../lib/geo-util';
+import type { Pov, Bounds } from '../lib/geo-util';
 
 function lighten(hex: string, amt: number): string {
   const h = hex.replace('#', '');
@@ -33,11 +33,14 @@ interface Props {
   markers?: CityMarker[];
   /** Click a marker -> select its parent country (by ADM0_A3). */
   onMarkerPick?: (a3: string) => void;
+  /** Fly-to + fit a selected area to the viewport (aspect-aware; supersedes `pov`). */
+  fit?: Bounds | null;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick, fit }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
+  const maxAltRef = useRef<number>(2.5);
   const statusesRef = useRef(statuses);
   const selectedRef = useRef(selectedId);
   const hoverRef = useRef<string | null>(null);
@@ -101,7 +104,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .labelText((d: unknown) => ((d as CityMarker).t ? (d as CityMarker).n : ''))
       .labelSize((d: unknown) => ((d as CityMarker).c ? 0.4 : 0.28))
       .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.1 : 0.065))
-      .labelColor((d: unknown) => ((d as CityMarker).c ? '#c9a0ff' : '#ffe14d'))
+      .labelColor((d: unknown) => ((d as CityMarker).c ? '#fb4b60' : '#ffe14d'))
       .labelAltitude(0.012)
       .labelResolution(2)
       .labelIncludeDot(true)
@@ -121,7 +124,10 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       gm.specular?.set(0x000000);
     } catch { /* ignore */ }
 
-    const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
+    const controls = globe.controls() as {
+      autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean;
+      minDistance: number; maxDistance: number; update?: () => void;
+    };
     // Respect "reduce motion": don't auto-spin (also easier on phone battery/CPU).
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     controls.autoRotate = !reduceMotion;
@@ -130,9 +136,28 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const stopSpin = () => { controls.autoRotate = false; };
     el.addEventListener('pointerdown', stopSpin, { once: true });
 
+    const radius = () => (globe as unknown as { getGlobeRadius?: () => number }).getGlobeRadius?.() ?? 100;
+    // Clamp zoom-out so Earth can never shrink to a dot: cap distance just past the
+    // altitude at which the whole globe fits the NARROWER screen axis (portrait phones
+    // need to pull back further, so this adapts to the viewport aspect).
+    const applyZoomLimits = () => {
+      const cam = globe.camera() as unknown as { fov?: number };
+      const vfov = ((cam.fov ?? 50) * Math.PI) / 180;
+      const aspect = el.clientWidth / Math.max(1, el.clientHeight);
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+      const minFov = Math.min(vfov, hfov);
+      maxAltRef.current = (1 / Math.sin(minFov / 2) - 1) * 1.12;
+      const r = radius();
+      controls.maxDistance = r * (1 + maxAltRef.current);
+      controls.minDistance = r * 1.02;
+      controls.update?.();
+    };
+    applyZoomLimits();
+    globe.pointOfView({ lat: 20, lng: 0, altitude: Math.min(2.2, maxAltRef.current) }, 0);
+
     globe.onZoom((p: Pov) => cbRef.current.onZoom?.(p));
 
-    const resize = () => globe.width(el.clientWidth).height(el.clientHeight);
+    const resize = () => { globe.width(el.clientWidth).height(el.clientHeight); applyZoomLimits(); };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(el);
@@ -150,7 +175,21 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
   useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); }, [markers]);
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
-  useEffect(() => { if (pov) globeRef.current?.pointOfView(pov, 800); }, [pov]);
+  useEffect(() => { if (pov) globeRef.current?.pointOfView({ ...pov, altitude: Math.min(pov.altitude, maxAltRef.current) }, 800); }, [pov]);
+  // Fit a selected area to the viewport: turn its angular size + the camera's field
+  // of view into the altitude at which it just fills the screen (per-axis, so a wide
+  // country on a tall phone still fits), then fly there.
+  useEffect(() => {
+    const globe = globeRef.current;
+    const el = elRef.current;
+    if (!fit || !globe || !el) return;
+    const cam = globe.camera() as unknown as { fov?: number };
+    const vfovDeg = cam.fov ?? 50;
+    const aspect = el.clientWidth / Math.max(1, el.clientHeight);
+    const hfovDeg = (2 * Math.atan(Math.tan(((vfovDeg * Math.PI) / 180) / 2) * aspect) * 180) / Math.PI;
+    const alt = Math.max(fit.h / vfovDeg, fit.w / hfovDeg) * 1.35;
+    globe.pointOfView({ lat: fit.lat, lng: fit.lng, altitude: Math.max(0.12, Math.min(alt, maxAltRef.current)) }, 800);
+  }, [fit]);
   useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
 
   return <div ref={elRef} className="globe-wrap" />;

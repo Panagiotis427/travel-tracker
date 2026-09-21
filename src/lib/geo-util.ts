@@ -49,3 +49,28 @@ export function focusOf(geom: Polygon | MultiPolygon): Pov {
   const altitude = Math.min(Math.max(best!.span / 55, 0.22), 1.5);
   return { lat, lng, altitude };
 }
+
+export interface Bounds { lat: number; lng: number; w: number; h: number }
+
+/**
+ * Center + angular extent (degrees) of a country/region's LARGEST part, for
+ * fit-to-view. `w` is the E-W span compressed by cos(lat) so a wide-but-high-
+ * latitude country (Norway) isn't over-zoomed; `h` is the N-S span. The globe's
+ * surface maps ~1 degree of arc per degree of lat/lng, so the viewer can turn
+ * these straight into a camera altitude given its field of view.
+ */
+export function boundsOf(geom: Polygon | MultiPolygon): Bounds {
+  let best: [number, number, number, number] | null = null;
+  let bestArea = -1;
+  for (const ring of exteriorRings(geom)) {
+    const [minX, minY, maxX, maxY] = ringBBox(ring);
+    const area = (maxX - minX) * (maxY - minY);
+    if (area > bestArea) { bestArea = area; best = [minX, minY, maxX, maxY]; }
+  }
+  const [minX, minY, maxX, maxY] = best!;
+  const lat = (minY + maxY) / 2;
+  const lng = (minX + maxX) / 2;
+  const h = maxY - minY;
+  const w = (maxX - minX) * Math.max(0.15, Math.cos((lat * Math.PI) / 180));
+  return { lat, lng, w, h };
+}

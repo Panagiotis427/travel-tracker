@@ -35,9 +35,11 @@ interface Props {
   onMarkerPick?: (a3: string) => void;
   /** Fly-to + fit a selected area to the viewport (aspect-aware; supersedes `pov`). */
   fit?: Bounds | null;
+  /** Current camera altitude, so marker size can track the live zoom level. */
+  viewAltitude?: number;
 }
 
-export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick, fit }: Props) {
+export default function GlobeView({ polygons, statuses, selectedId, globeImage, onPick, onDeselect, onHover, onZoom, pov, colorOverride, markers, onMarkerPick, fit, viewAltitude }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const maxAltRef = useRef<number>(2.5);
@@ -177,6 +179,17 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
 
   useEffect(() => { globeRef.current?.polygonsData(polygons as unknown as object[]); }, [polygons]);
   useEffect(() => { globeRef.current?.labelsData((markers ?? []) as unknown as object[]); }, [markers]);
+  // Marker size tracks the live zoom. Labels are 3D (perspective-scaled), so to keep
+  // them a roughly constant, legible size on screen at every zoom their world size
+  // must scale with camera altitude (screen size ~ worldSize / distance). Re-applied
+  // on each altitude change; fresh closures force three-globe to re-render the layer.
+  useEffect(() => {
+    const g = globeRef.current;
+    if (!g) return;
+    const a = Math.max(0.08, Math.min(viewAltitude ?? 1, 2.5));
+    g.labelSize((d: unknown) => ((d as CityMarker).c ? 1.15 : 0.82) * a)
+     .labelDotRadius((d: unknown) => ((d as CityMarker).c ? 0.32 : 0.2) * a);
+  }, [viewAltitude]);
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statuses, selectedId, colorOverride]);
   useEffect(() => { if (pov) globeRef.current?.pointOfView({ ...pov, altitude: Math.min(pov.altitude, maxAltRef.current) }, 800); }, [pov]);
   // Fit a selected area to the viewport: turn its angular size + the camera's field

@@ -676,7 +676,7 @@ export default function App() {
           </div>
         )}
         <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} />
+          <GlobeView polygons={displayFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} />
         </Suspense>
       </main>
 

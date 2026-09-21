@@ -24,6 +24,8 @@ body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .app {
@@ -772,16 +774,19 @@ footer {
 
 @media (max-width: 720px) {
   /* Globe is full-screen; the sidebar becomes a slide-in drawer. */
+  .app {
+    height: 100dvh;
+  }
   .menu-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     position: fixed;
-    top: 12px;
-    left: 12px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
     z-index: 46;
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
     border-radius: 10px;
     background: rgba(13, 33, 48, 0.92);
     color: var(--text);
@@ -794,22 +799,24 @@ footer {
     background: none;
     border: none;
     color: var(--muted);
-    font-size: 22px;
+    font-size: 26px;
     line-height: 1;
     cursor: pointer;
-    padding: 0 4px;
+    padding: 4px 6px;
   }
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: min(86vw, 320px);
-    height: 100%;
+    width: min(86vw, 340px);
+    height: 100dvh;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     z-index: 48;
     overflow-y: auto;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
   }
   .sidebar.open {
     transform: translateX(0);
@@ -823,13 +830,25 @@ footer {
   }
   .map-wrap {
     flex: 1;
-    min-height: 100vh;
+    min-height: 100dvh;
   }
   .map-banner {
-    top: 12px;
+    top: calc(12px + env(safe-area-inset-top));
     left: auto;
-    right: 12px;
+    right: calc(12px + env(safe-area-inset-right));
     transform: none;
-    max-width: calc(100% - 120px);
+    max-width: calc(100% - 116px);
+  }
+  /* comfortable tap targets on touch */
+  .io,
+  .reset,
+  .drill,
+  .back,
+  .search input,
+  .account input {
+    min-height: 44px;
+  }
+  .st {
+    min-height: 42px;
   }
 }

@@ -102,7 +102,9 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     } catch { /* ignore */ }
 
     const controls = globe.controls() as { autoRotate: boolean; autoRotateSpeed: number; enableDamping: boolean };
-    controls.autoRotate = true;
+    // Respect "reduce motion": don't auto-spin (also easier on phone battery/CPU).
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    controls.autoRotate = !reduceMotion;
     controls.autoRotateSpeed = 0.35;
     controls.enableDamping = true;
     const stopSpin = () => { controls.autoRotate = false; };

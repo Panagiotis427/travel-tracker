@@ -52,7 +52,7 @@ function beenChecker(m: StatusMap): (id: string) => boolean {
 
 export default function App() {
   const [visits, setVisits] = useState<VisitMap>({});
-  const [lod, setLod] = useState<Lod>('50m');
+  const [lod, setLod] = useState<Lod>('110m');
   const [theme, setTheme] = useState<'dark' | 'day'>('dark');
   const [worldFeatures, setWorldFeatures] = useState<CountryFeature[]>([]);
   const [regions1, setRegions1] = useState<Record<string, CountryFeature[]>>({});
@@ -105,7 +105,7 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true);
-    loadWorld('50m').finally(() => setLoading(false));
+    loadWorld('110m').finally(() => setLoading(false));
     // Visits are loaded per-account on login; guests start empty and save nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -174,7 +174,8 @@ export default function App() {
   function onZoom(p: Pov) {
     if (lodTimer.current) window.clearTimeout(lodTimer.current);
     lodTimer.current = window.setTimeout(async () => {
-      const wantLod: Lod = p.altitude < 0.55 ? '10m' : '50m';
+      // 3-tier LOD: light 110m at world view, sharper 50m mid-zoom, 10m up close.
+      const wantLod: Lod = p.altitude < 0.55 ? '10m' : p.altitude < 1.4 ? '50m' : '110m';
       setLod((cur) => { if (cur !== wantLod) void loadWorld(wantLod); return wantLod; });
 
       const wantLevel = p.altitude < A2_ALT ? 2 : p.altitude < EXPAND_ALT ? 1 : 0;

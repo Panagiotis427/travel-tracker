@@ -77,7 +77,10 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
 
   useEffect(() => {
     const el = elRef.current!;
-    const globe: GlobeInstance = new Globe(el)
+    // logarithmicDepthBuffer stops the country polygons (which sit a hair above the
+    // globe surface) from z-fighting the texture as the camera moves — that was the
+    // shifting dark speckle. antialias smooths the polygon/label edges too.
+    const globe: GlobeInstance = new Globe(el, { rendererConfig: { antialias: true, logarithmicDepthBuffer: true } })
       .backgroundColor('#0b1f2a')
       .globeImageUrl(globeImage)
       .showAtmosphere(true)
@@ -184,11 +187,18 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     const el = elRef.current;
     if (!fit || !globe || !el) return;
     const cam = globe.camera() as unknown as { fov?: number };
-    const vfovDeg = cam.fov ?? 50;
+    const vfov = ((cam.fov ?? 50) * Math.PI) / 180;
     const aspect = el.clientWidth / Math.max(1, el.clientHeight);
-    const hfovDeg = (2 * Math.atan(Math.tan(((vfovDeg * Math.PI) / 180) / 2) * aspect) * 180) / Math.PI;
-    const alt = Math.max(fit.h / vfovDeg, fit.w / hfovDeg) * 1.35;
-    globe.pointOfView({ lat: fit.lat, lng: fit.lng, altitude: Math.max(0.12, Math.min(alt, maxAltRef.current)) }, 800);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+    // Exact altitude at which a surface arc of angular span `spanDeg` (centred on the
+    // camera axis) just reaches the edge of a half-FOV: the edge point sits at central
+    // angle phi, so tan(halfFov) = r*sin(phi) / (D - r*cos(phi)). Solve for D/r - 1.
+    const fitAlt = (spanDeg: number, halfFov: number) => {
+      const phi = (spanDeg * Math.PI) / 360;
+      return Math.cos(phi) + Math.sin(phi) / Math.tan(halfFov) - 1;
+    };
+    const alt = Math.max(fitAlt(fit.h, vfov / 2), fitAlt(fit.w, hfov / 2)) * 1.12;
+    globe.pointOfView({ lat: fit.lat, lng: fit.lng, altitude: Math.max(0.08, Math.min(alt, maxAltRef.current)) }, 800);
   }, [fit]);
   useEffect(() => { globeRef.current?.globeImageUrl(globeImage); }, [globeImage]);
 

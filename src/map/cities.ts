@@ -13,7 +13,8 @@ export interface CityMarker {
   t?: 0 | 1;  // show text label (set by selectMarkers; else dot only)
 }
 
-export type MarkerMode = 'off' | 'capitals' | 'cities';
+// 'selected' = only the country the user picked (default); 'all' = everywhere.
+export type MarkerMode = 'off' | 'selected' | 'all';
 
 let capsCache: CityMarker[] | null = null;
 let citiesCache: CityMarker[] | null = null;

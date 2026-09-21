@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, ChangeEvent } from 'react';
 import { loadFeatures, loadAdmin1, loadAdmin2, featureName, isSovereign } from './map/geo';
 import type { CountryFeature } from './map/geo';
-import { loadCapitals, loadCities, selectMarkers, markerCap } from './map/cities';
+import { loadCities, selectMarkers, markerCap } from './map/cities';
 import type { CityMarker, MarkerMode } from './map/cities';
 import { initCountryIndex, classifyCountry, classifyRegion } from './map/classify';
 import { focusOf } from './lib/geo-util';
@@ -72,11 +72,10 @@ export default function App() {
   const [bgOn, setBgOn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [markerMode, setMarkerMode] = useState<MarkerMode>(() => {
-    try { const v = localStorage.getItem(MARKER_KEY); if (v === 'off' || v === 'capitals' || v === 'cities') return v; } catch { /* ignore */ }
-    return 'capitals';
+    try { const v = localStorage.getItem(MARKER_KEY); if (v === 'off' || v === 'selected' || v === 'all') return v; } catch { /* ignore */ }
+    return 'selected';
   });
   const [zoomAlt, setZoomAlt] = useState<number>(OVERVIEW.altitude);
-  const [capitalsData, setCapitalsData] = useState<CityMarker[]>([]);
   const [citiesData, setCitiesData] = useState<CityMarker[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [compareId, setCompareId] = useState<string | null>(null);
@@ -96,6 +95,7 @@ export default function App() {
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
   const isMobile = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches, []);
+  const selectedA3 = selectedId ? selectedId.split('-')[0] : null;
 
   const mergeMeta = useCallback((feats: CountryFeature[]) => {
     setMeta((prev) => {
@@ -121,21 +121,24 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // City / capital markers: load on demand (capitals tiny, cities lazy) and remember
-  // the user's choice on this device. This is a view preference, not travel data.
+  // City / capital markers. Remember the user's choice on this device (a view
+  // preference, not travel data). Fetch the data only when it will actually be
+  // shown — in 'selected' mode that's not until a country is picked.
+  useEffect(() => { try { localStorage.setItem(MARKER_KEY, markerMode); } catch { /* ignore */ } }, [markerMode]);
   useEffect(() => {
-    if (markerMode !== 'off') {
-      loadCapitals().then(setCapitalsData).catch(() => { /* offline / not built */ });
-      if (markerMode === 'cities') loadCities().then(setCitiesData).catch(() => { /* ignore */ });
-    }
-    try { localStorage.setItem(MARKER_KEY, markerMode); } catch { /* ignore */ }
-  }, [markerMode]);
+    const need = markerMode === 'all' || (markerMode === 'selected' && !!selectedA3);
+    if (need && !citiesData.length) loadCities().then(setCitiesData).catch(() => { /* offline / not built */ });
+  }, [markerMode, selectedA3, citiesData.length]);
 
   const visibleMarkers = useMemo(() => {
-    if (markerMode === 'off') return [];
-    const pool = markerMode === 'cities' ? citiesData : capitalsData;
-    return selectMarkers(pool, zoomAlt, markerCap(zoomAlt, isMobile));
-  }, [markerMode, citiesData, capitalsData, zoomAlt, isMobile]);
+    if (markerMode === 'off' || !citiesData.length) return [];
+    if (markerMode === 'selected') {
+      if (!selectedA3) return [];
+      const sub = citiesData.filter((m) => m.a3 === selectedA3);
+      return selectMarkers(sub, zoomAlt, markerCap(zoomAlt, isMobile));
+    }
+    return selectMarkers(citiesData, zoomAlt, markerCap(zoomAlt, isMobile));
+  }, [markerMode, citiesData, selectedA3, zoomAlt, isMobile]);
 
   // Import a shared map from the URL hash (#s=...) once on load.
   useEffect(() => {
@@ -642,8 +645,8 @@ export default function App() {
             <button className="io" onClick={() => setTheme((t) => (t === 'dark' ? 'day' : 'dark'))}>{theme === 'dark' ? 'Day globe' : 'Night globe'}</button>
             <button className="io" onClick={resetView}>Reset view</button>
           </div>
-          <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'capitals' : m === 'capitals' ? 'cities' : 'off'))}>
-            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'capitals' ? 'Capitals' : 'All'}
+          <button className="io" onClick={() => setMarkerMode((m) => (m === 'off' ? 'selected' : m === 'selected' ? 'all' : 'off'))}>
+            Cities: {markerMode === 'off' ? 'Off' : markerMode === 'selected' ? 'This country' : 'Everywhere'}
           </button>
           <div className="io-row">
             <button className="io" onClick={exportJson}>Export JSON</button>

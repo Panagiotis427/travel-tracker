@@ -16,5 +16,11 @@
     "mapshaper": "^0.6.102",
     "topojson-client": "^3.1.0",
     "topojson-server": "^3.0.1"
+  },
+  "overrides": {
+    "adm-zip": "^0.6.1",
+    "fflate": "^0.8.3",
+    "file-type": "^21.3.1",
+    "image-size": "^2.0.3"
   }
 }

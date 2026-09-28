@@ -6,6 +6,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 // Pages, inside a Capacitor Android wrapper, and as an installable desktop PWA.
 export default defineConfig({
   base: './',
+  // The lazily loaded globe chunk (three.js) is ~2 MB, so warn only when a chunk would outgrow the
+  // service worker's precache limit (maximumFileSizeToCacheInBytes below) and stop working offline.
+  build: { chunkSizeWarningLimit: 3000 },
   server: { port: 5180, strictPort: false },
   preview: { port: 4180, strictPort: false },
   plugins: [

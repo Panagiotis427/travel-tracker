@@ -38,9 +38,8 @@ The `android/` folder is generated (gitignored), not committed.
 **Requirements:** JDK **21** (Capacitor 8 needs 21, not 17) and the Android SDK
 (platform + build-tools **35**, platform-tools). Android Studio bundles both.
 
-**Path caveat:** Gradle can misbehave when the project path contains a space
-(this repo lives under `D:\Code Projects\...`). If a build fails oddly, copy or
-clone the project to a space-free path (e.g. `D:\code\travel-tracker`) and build
+**Path caveat:** Gradle can misbehave when the project path contains a space. If a
+build fails oddly, copy or clone the project to a space-free path (e.g. `D:\code\travel-tracker`) and build
 there.
 
 **Easy path (Android Studio):**

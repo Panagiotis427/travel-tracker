@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SECRETS = join(HERE, '..', '..', 'secrets.env'); // D:\Code Projects\secrets.env
+const SECRETS = join(HERE, '..', '..', 'secrets.env'); // the workspace-level file beside the repo
 const OUT = join(HERE, '..', '.env.local');
 
 // Accept any form the user pastes (dashboard link, api-keys page, or the api URL)

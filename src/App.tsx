@@ -22,6 +22,7 @@ import type { SyncState } from './state/sync';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
 import PasswordDialog from './features/PasswordDialog';
+import ShareDialog from './features/ShareDialog';
 import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
@@ -100,6 +101,7 @@ export default function App() {
   const [syncState, setSyncState] = useState<SyncState>('synced');
   const [pullTry, setPullTry] = useState(0); // bumped to retry a sign-in pull that failed
   const [pwDialog, setPwDialog] = useState<'change' | 'recovery' | null>(null);
+  const [shareDialog, setShareDialog] = useState<'share' | 'add' | null>(null);
   const [guestToast, setGuestToast] = useState(false);
   const guestWarned = useRef(false);
 
@@ -635,14 +637,13 @@ export default function App() {
   }, [markCoords]);
 
   // --- sharing (backend-free) ---
-  async function shareMine() {
+  function shareMine() {
     if (!Object.keys(statuses).length) { setShareMsg('Nothing marked to share yet.'); return; }
-    const name = window.prompt('Your name for the shared map?', 'Me');
-    if (name === null) return;
-    const code = await encodeShare(name || 'Me', statuses);
-    const link = `${window.location.origin}${window.location.pathname}#s=${code}`;
-    try { await navigator.clipboard.writeText(link); setShareMsg('Share link copied to clipboard.'); }
-    catch { window.prompt('Copy your share link:', link); setShareMsg('Share link ready.'); }
+    setShareDialog('share');
+  }
+  async function makeShareLink(name: string) {
+    const code = await encodeShare(name, statuses);
+    return `${window.location.origin}${window.location.pathname}#s=${code}`;
   }
   async function addOverlayFromCode(code: string) {
     try {
@@ -652,8 +653,7 @@ export default function App() {
     } catch { setShareMsg('Could not read that share link.'); }
   }
   function addOverlayPrompt() {
-    const code = window.prompt('Paste a share link:');
-    if (code) void addOverlayFromCode(code);
+    setShareDialog('add');
   }
   function removeOverlay(id: string) {
     setOverlays((prev) => prev.filter((o) => o.id !== id));
@@ -927,6 +927,14 @@ export default function App() {
 
       {showAuth && !session && cloudEnabled && <AuthScreen onSkip={skipWelcome} />}
       {pwDialog && <PasswordDialog mode={pwDialog} onClose={(m) => { setPwDialog(null); if (m) setProfileMsg(m); }} />}
+      {shareDialog && (
+        <ShareDialog
+          mode={shareDialog}
+          makeLink={makeShareLink}
+          onAdd={(link) => void addOverlayFromCode(link)}
+          onClose={(m) => { setShareDialog(null); if (m) setShareMsg(m); }}
+        />
+      )}
     </div>
   );
 }

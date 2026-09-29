@@ -678,11 +678,13 @@ footer {
   padding: 6px 12px;
 }
 
-/* in-app password dialog */
-.pw-modal {
+/* in-app form dialogs (password, sharing) */
+.pw-modal,
+.share-modal {
   width: min(380px, 100%);
 }
-.pw-input {
+.pw-input,
+.dialog-input {
   display: block;
   width: 100%;
   box-sizing: border-box;

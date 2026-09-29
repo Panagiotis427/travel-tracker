@@ -15,7 +15,8 @@ import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getUserVisits, putUserVisit, deleteUserVisit, clearUserVisits, putUserMany } from './state/db';
 import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import { pullRemote, pushRemote, deleteRemote, deleteAllRemote } from './state/cloud';
+import { pullRemote, pushRemote, deleteRemote, deleteClearedRemote, deleteAllRemote } from './state/cloud';
+import { loadPending, addTombstone, dropTombstone, markCleared, confirmCleared, applyTombstones } from './state/pending';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
 import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
@@ -102,6 +103,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const userIdRef = useRef<string | null>(null);
   const syncedFor = useRef<string | null>(null);
+  const visitsRef = useRef<VisitMap>({}); // latest marks, for retries fired outside React (the 'online' event)
+  visitsRef.current = visits;
 
   const globeImage = import.meta.env.BASE_URL + TEX[theme];
   const isMobile = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches, []);
@@ -191,7 +194,10 @@ export default function App() {
   // Track the auth session (persists on this device = "remember me").
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    supabase.auth.getSession()
+      .then(({ data }) => setSession(data.session))
+      .catch(() => setSession(null)) // e.g. a stored session whose refresh fails while the server is unreachable
+      .finally(() => setAuthReady(true)); // never leave the app waiting on auth
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       if (event === 'PASSWORD_RECOVERY') {
@@ -209,6 +215,19 @@ export default function App() {
     if (cloudEnabled && localStorage.getItem(WELCOME_KEY) !== '1') setShowAuth(true);
   }, [authReady, session]);
 
+  // Send everything the cloud hasn't confirmed yet: a pending "clear all", pending deletes,
+  // then the current marks. Used after sign-in, after edits, and when the device comes back
+  // online, so work done offline (or while the server was paused) is never silently lost.
+  async function flushSync(uid: string, map: VisitMap) {
+    if (!cloudEnabled) return;
+    const p = loadPending(uid);
+    if (p.clearedAt && (await deleteClearedRemote(p.clearedAt))) confirmCleared(uid, p.clearedAt);
+    for (const [id, at] of Object.entries(p.dels)) {
+      if (await deleteRemote(id, at)) dropTombstone(uid, id);
+    }
+    await pushRemote(uid, map);
+  }
+
   // On login: pull the user's cloud data, merge (last-write-wins), push the union.
   // Without Supabase keys there are no accounts, so marks are saved on the device under LOCAL_UID.
   useEffect(() => {
@@ -218,7 +237,11 @@ export default function App() {
     if (syncedFor.current === uid) return;
     syncedFor.current = uid;
     (async () => {
-      const [local, remote] = await Promise.all([getUserVisits(uid), pullRemote()]);
+      const [local, remoteRaw] = await Promise.all([getUserVisits(uid), pullRemote()]);
+      // Rows this device deleted while offline must not come back from the cloud; a newer
+      // re-mark from another device wins and retires its tombstone.
+      const { kept: remote, stale } = applyTombstones(remoteRaw, loadPending(uid));
+      for (const id of stale) dropTombstone(uid, id);
       const merged: VisitMap = { ...local };
       for (const [id, rv] of Object.entries(remote)) {
         const cur = merged[id];
@@ -226,7 +249,7 @@ export default function App() {
       }
       setVisits(merged);
       void putUserMany(uid, merged);
-      void pushRemote(uid, merged);
+      void flushSync(uid, merged);
     })();
   }, [session]);
 
@@ -234,9 +257,18 @@ export default function App() {
   useEffect(() => {
     const uid = userIdRef.current;
     if (!uid) return;
-    const t = window.setTimeout(() => void pushRemote(uid, visits), 800);
+    const t = window.setTimeout(() => void flushSync(uid, visits), 800);
     return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visits]);
+
+  // Back online: retry whatever failed while offline.
+  useEffect(() => {
+    const onOnline = () => { const uid = userIdRef.current; if (uid) void flushSync(uid, visitsRef.current); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Seamless LOD: swap admin-0 detail, then resolve the viewed country into
   // Admin-1 (zoom in) or Admin-2 (zoom in further); only a few kept expanded.
@@ -365,9 +397,25 @@ export default function App() {
 
   // Persist helpers: write locally (scoped to the signed-in user) and let the
   // debounced effect push to the cloud. Guests (no uid) save nothing.
-  function pLocal(id: string, v: Visit) { const u = userIdRef.current; if (u) void putUserVisit(u, id, v); }
-  function pDelete(id: string) { const u = userIdRef.current; if (u) { void deleteUserVisit(u, id); void deleteRemote(id); } }
-  function pMany(map: VisitMap) { const u = userIdRef.current; if (u) void putUserMany(u, map); }
+  // Re-marking a place makes it alive again, so any pending delete for it is retired.
+  function pLocal(id: string, v: Visit) {
+    const u = userIdRef.current; if (!u) return;
+    void putUserVisit(u, id, v);
+    if (cloudEnabled) dropTombstone(u, id);
+  }
+  function pDelete(id: string) {
+    const u = userIdRef.current; if (!u) return;
+    void deleteUserVisit(u, id);
+    if (!cloudEnabled) return;
+    const at = new Date().toISOString();
+    addTombstone(u, id, at); // recorded BEFORE the request: an offline delete is retried, never lost
+    void deleteRemote(id, at).then((done) => { if (done) dropTombstone(u, id); });
+  }
+  function pMany(map: VisitMap) {
+    const u = userIdRef.current; if (!u) return;
+    void putUserMany(u, map);
+    if (cloudEnabled) for (const id of Object.keys(map)) dropTombstone(u, id);
+  }
 
   function setStatus(id: string, status: Status | null) {
     if (status === null) {
@@ -398,7 +446,14 @@ export default function App() {
     if (window.confirm('Clear all marks? This cannot be undone.')) {
       setVisits({});
       const u = userIdRef.current;
-      if (u) { void clearUserVisits(u); void deleteAllRemote(); }
+      if (u) {
+        void clearUserVisits(u);
+        if (cloudEnabled) {
+          const at = new Date().toISOString();
+          markCleared(u, at); // kept until the server confirms, so a clear made offline still happens
+          void deleteClearedRemote(at).then((done) => { if (done) confirmCleared(u, at); });
+        }
+      }
     }
   }
 
@@ -423,7 +478,11 @@ export default function App() {
     if (!supabase) return;
     if (!window.confirm('Delete your account data and sign out? Your marks are removed from the cloud. This cannot be undone.')) return;
     const u = userIdRef.current;
-    await deleteAllRemote();
+    if (!(await deleteAllRemote())) {
+      // Don't wipe this device or sign out on a failed delete: that would claim success falsely.
+      setProfileMsg('Could not reach the sync server, so nothing was deleted. Try again when you are online.');
+      return;
+    }
     if (u) void clearUserVisits(u);
     setVisits({});
     await supabase.auth.signOut();
@@ -617,10 +676,23 @@ export default function App() {
         </div>
 
         <div className="search">
-          <input placeholder="Search country…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input
+            placeholder="Search country…"
+            aria-label="Search country"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && matches.length) { pick(matches[0].id); setQuery(''); }
+              else if (e.key === 'Escape') setQuery('');
+            }}
+          />
           {matches.length > 0 && (
-            <ul className="search-list">
-              {matches.map((f) => (<li key={f.id} onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</li>))}
+            <ul className="search-list" aria-label="Matching countries">
+              {matches.map((f) => (
+                <li key={f.id}>
+                  <button type="button" className="search-hit" onClick={() => { pick(f.id); setQuery(''); }}>{featureName(f)}</button>
+                </li>
+              ))}
             </ul>
           )}
         </div>
@@ -636,7 +708,7 @@ export default function App() {
             </div>
             <div className="status-grid">
               {STATUSES.map((s) => (
-                <button key={s} className={selVisit?.status === s ? 'st on' : 'st'} style={{ '--c': STATUS_META[s].color } as CSSProperties} onClick={() => setStatus(selectedId!, s)}>{STATUS_META[s].label}</button>
+                <button key={s} className={selVisit?.status === s ? 'st on' : 'st'} aria-pressed={selVisit?.status === s} style={{ '--c': STATUS_META[s].color } as CSSProperties} onClick={() => setStatus(selectedId!, s)}>{STATUS_META[s].label}</button>
               ))}
               <button className="st clear" onClick={() => setStatus(selectedId!, null)}>Clear</button>
             </div>
@@ -685,14 +757,17 @@ export default function App() {
         <div className="people">
           <div className="people-head"><span>People</span><button className="io" onClick={shareMine}>Share my map</button></div>
           <ul className="people-list">
-            <li className={compareId ? '' : 'on'} onClick={() => setCompareId(null)}>
-              <span className="swatch" style={{ background: STATUS_META.visited.color }} />Me
+            <li className={compareId ? '' : 'on'}>
+              <button type="button" className="pname" aria-pressed={!compareId} onClick={() => setCompareId(null)}>
+                <span className="swatch" style={{ background: STATUS_META.visited.color }} />Me
+              </button>
             </li>
             {overlays.map((o) => (
               <li key={o.id} className={compareId === o.id ? 'on' : ''}>
-                <span className="swatch" style={{ background: o.color }} />
-                <span className="pname" onClick={() => setCompareId(compareId === o.id ? null : o.id)}>{o.name}</span>
-                <button className="x" onClick={() => removeOverlay(o.id)} aria-label="Remove">×</button>
+                <button type="button" className="pname" aria-pressed={compareId === o.id} onClick={() => setCompareId(compareId === o.id ? null : o.id)}>
+                  <span className="swatch" style={{ background: o.color }} />{o.name}
+                </button>
+                <button className="x" onClick={() => removeOverlay(o.id)} aria-label={`Remove ${o.name}`}>×</button>
               </li>
             ))}
           </ul>

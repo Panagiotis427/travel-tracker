@@ -28,11 +28,17 @@ function toRows(userId: string, map: VisitMap): Row[] {
   }));
 }
 
-export async function pushRemote(userId: string, map: VisitMap): Promise<void> {
-  if (!supabase) return;
+// supabase-js RETURNS errors instead of throwing them (and throws on some transport
+// failures), so every write reports success explicitly: callers retry what failed.
+async function ok(req: PromiseLike<{ error: unknown }>): Promise<boolean> {
+  try { const { error } = await req; return !error; } catch { return false; }
+}
+
+export async function pushRemote(userId: string, map: VisitMap): Promise<boolean> {
+  if (!supabase) return true;
   const rows = toRows(userId, map);
-  if (!rows.length) return;
-  await supabase.from('visits').upsert(rows, { onConflict: 'user_id,place_id' });
+  if (!rows.length) return true;
+  return ok(supabase.from('visits').upsert(rows, { onConflict: 'user_id,place_id' }));
 }
 
 export async function upsertRemote(userId: string, id: string, v: Visit): Promise<void> {
@@ -40,12 +46,20 @@ export async function upsertRemote(userId: string, id: string, v: Visit): Promis
   await supabase.from('visits').upsert(toRows(userId, { [id]: v }), { onConflict: 'user_id,place_id' });
 }
 
-export async function deleteRemote(id: string): Promise<void> {
-  if (!supabase) return;
-  await supabase.from('visits').delete().eq('place_id', id);
+/** Delete one place, unless the stored row is newer than our delete (last write wins). */
+export async function deleteRemote(id: string, deletedAt: string): Promise<boolean> {
+  if (!supabase) return true;
+  return ok(supabase.from('visits').delete().eq('place_id', id).lte('updated_at', deletedAt));
 }
 
-export async function deleteAllRemote(): Promise<void> {
-  if (!supabase) return;
-  await supabase.from('visits').delete().neq('place_id', '');
+/** "Clear all marks": delete rows written up to the clear; newer ones from another device survive. */
+export async function deleteClearedRemote(clearedAt: string): Promise<boolean> {
+  if (!supabase) return true;
+  return ok(supabase.from('visits').delete().lte('updated_at', clearedAt));
+}
+
+/** Account deletion: remove every row. */
+export async function deleteAllRemote(): Promise<boolean> {
+  if (!supabase) return true;
+  return ok(supabase.from('visits').delete().neq('place_id', ''));
 }

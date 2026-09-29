@@ -6,6 +6,20 @@ interface Props {
   onSkip: () => void;
 }
 
+// Turn transport failures (offline, sync server paused/unreachable) into guidance;
+// real auth errors such as "Invalid login credentials" pass through unchanged.
+function friendlyError(err: unknown): string {
+  const e = err as { message?: string; name?: string } | null;
+  const m = e?.message ?? String(err);
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'You are offline. Connect to sign in, or continue without an account.';
+  }
+  if (e?.name === 'AuthRetryableFetchError' || /failed to fetch|fetch failed|networkerror|load failed|timed? ?out|50[234]/i.test(m)) {
+    return 'Can\'t reach the sync server right now. Try again in a moment, or continue without an account.';
+  }
+  return m;
+}
+
 // Optional first-run auth screen. Login succeeds -> App's auth listener sets the
 // session and unmounts this. "Continue without an account" keeps it local-first.
 export default function AuthScreen({ onSkip }: Props) {
@@ -21,14 +35,19 @@ export default function AuthScreen({ onSkip }: Props) {
     setBusy(true);
     setMsg(null);
     const creds = { email: email.trim(), password: pw };
-    const { error } =
-      mode === 'login'
-        ? await supabase.auth.signInWithPassword(creds)
-        : await supabase.auth.signUp(creds);
-    setBusy(false);
-    if (error) setMsg(error.message);
-    else if (mode === 'signup') setMsg('Account created. If email confirmation is on, confirm via the email, then log in.');
-    // On success the session listener in App closes this screen.
+    try {
+      const { error } =
+        mode === 'login'
+          ? await supabase.auth.signInWithPassword(creds)
+          : await supabase.auth.signUp(creds);
+      if (error) setMsg(friendlyError(error));
+      else if (mode === 'signup') setMsg('Account created. If email confirmation is on, confirm via the email, then log in.');
+      // On success the session listener in App closes this screen.
+    } catch (err) {
+      setMsg(friendlyError(err)); // a thrown network error must not leave the button stuck on "Please wait"
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function reset() {
@@ -36,9 +55,14 @@ export default function AuthScreen({ onSkip }: Props) {
     const em = email.trim() || window.prompt('Your account email:') || '';
     if (!em) return;
     setBusy(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo: window.location.origin + window.location.pathname });
-    setBusy(false);
-    setMsg(error ? error.message : 'If that email has an account, a password-reset link is on its way.');
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo: window.location.origin + window.location.pathname });
+      setMsg(error ? friendlyError(error) : 'If that email has an account, a password-reset link is on its way.');
+    } catch (err) {
+      setMsg(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -48,8 +72,8 @@ export default function AuthScreen({ onSkip }: Props) {
         <p className="auth-tag">Track the countries and regions you have been to. Works offline and free — sign in to sync across your devices.</p>
 
         <form onSubmit={submit} className="auth-form">
-          <input type="email" placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <input type="password" placeholder="Password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={pw} onChange={(e) => setPw(e.target.value)} required minLength={6} />
+          <input type="email" placeholder="Email" aria-label="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input type="password" placeholder="Password" aria-label="Password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={pw} onChange={(e) => setPw(e.target.value)} required minLength={6} />
           <button className="auth-primary" type="submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}</button>
         </form>
 
@@ -58,7 +82,7 @@ export default function AuthScreen({ onSkip }: Props) {
         </button>
         {mode === 'login' && <button className="auth-switch" onClick={reset} disabled={busy}>Forgot password?</button>}
 
-        {msg && <div className="auth-msg">{msg}</div>}
+        <div className="auth-msg" role="status" aria-live="polite">{msg}</div>
 
         <button className="auth-skip" onClick={onSkip}>Continue without an account</button>
       </div>

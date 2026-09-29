@@ -19,7 +19,11 @@ export interface GeoProps {
 }
 
 /** A polygon feature (country or sub-region) with a guaranteed string id. */
-export type CountryFeature = Feature<Polygon | MultiPolygon, GeoProps> & { id: string };
+export type CountryFeature = Feature<Polygon | MultiPolygon, GeoProps> & {
+  id: string;
+  /** An expanded country's own outline drawn beneath its regions to fill border gaps. */
+  underlay?: boolean;
+};
 
 export function featureName(f: CountryFeature): string {
   return f.properties?.NAME ?? f.properties?.name ?? f.id;

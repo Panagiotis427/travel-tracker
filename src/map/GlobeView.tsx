@@ -69,13 +69,15 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       const st = statusesRef.current[id] ?? (id.includes('-') ? statusesRef.current[id.split('-')[0]] : undefined);
       base = st ? STATUS_META[st].color : UNVISITED_COLOR;
     }
-    if (id === selectedRef.current) return lighten(base, 0.4);
+    // The underlay only fills border gaps, so it never takes the selection highlight.
+    if (id === selectedRef.current && !(d as CountryFeature).underlay) return lighten(base, 0.4);
     return base;
   };
   // Countries lie flat on the sphere at a constant tiny altitude: nothing rises,
   // bobs, or pokes past the globe's edge on hover. Hover/selection = colour only.
   const strokeColor = (d: unknown): string =>
-    idOf(d) === selectedRef.current ? '#ffffff' : 'rgba(255,255,255,0.22)';
+    (d as CountryFeature).underlay ? (null as unknown as string) // its regions on top draw the borders
+      : idOf(d) === selectedRef.current ? '#ffffff' : 'rgba(255,255,255,0.22)';
 
   const refresh = () => {
     globeRef.current?.polygonCapColor(capColor).polygonStrokeColor(strokeColor);
@@ -100,7 +102,8 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       // invisible transparent wall for every polygon on every frame. null = cap only.
       .polygonSideColor(() => null as unknown as string)
       .polygonStrokeColor(strokeColor)
-      .polygonAltitude(0.002)
+      // An expanded country's underlay (see App displayFeatures) sits just below its regions.
+      .polygonAltitude((d: unknown) => ((d as CountryFeature).underlay ? 0.0012 : 0.002))
       // Caps are flat triangles sitting 0.2 units above the sphere. A triangle spanning
       // theta degrees dips r*theta^2/8 below the curved surface, so any wider than ~7 deg
       // sinks under the globe and shows as a black hole. The 5-deg default still left holes

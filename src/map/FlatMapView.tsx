@@ -129,9 +129,10 @@ export default function FlatMapView({ polygons, statuses, selectedId, onPick, on
     for (const f of polysRef.current) {
       let path = paths.current.get(f);
       if (!path) { path = buildPath(f.geometry as Polygon | MultiPolygon); paths.current.set(f, path); }
-      const sel = f.id === selectedRef.current;
+      const sel = f.id === selectedRef.current && !f.underlay; // the underlay never takes the highlight
       ctx.fillStyle = sel ? lighten(colorFor(f.id), 0.35) : colorFor(f.id);
       ctx.fill(path);
+      if (f.underlay) continue; // fills border gaps only; its regions draw the borders
       ctx.strokeStyle = sel ? '#ffffff' : 'rgba(11,31,42,0.5)';
       ctx.lineWidth = (sel ? 1.4 : 0.5) / k;
       ctx.stroke(path);
@@ -263,12 +264,18 @@ export default function FlatMapView({ polygons, statuses, selectedId, onPick, on
     if (dr && !dr.moved && pointers.current.size === 0) {
       const [bx, by] = toBase(e.clientX, e.clientY);
       const [lon, lat] = baseToLonLat(bx, by);
+      // A region wins over its country's underlay; the underlay only answers in a border gap.
       let hit: string | null = null;
+      let gap: string | null = null;
       for (const f of polysRef.current) {
         const bb = bboxOf(f.geometry as Polygon | MultiPolygon);
         if (lon < bb[0] || lon > bb[2] || lat < bb[1] || lat > bb[3]) continue;
-        if (pointInGeometry([lon, lat], f.geometry as Polygon | MultiPolygon)) { hit = f.id; break; }
+        if (!pointInGeometry([lon, lat], f.geometry as Polygon | MultiPolygon)) continue;
+        if (f.underlay) { gap ??= f.id; continue; }
+        hit = f.id;
+        break;
       }
+      hit ??= gap;
       if (hit) onPick(hit); else onDeselect?.();
     } else {
       reportView(); // panned/pinched -> update LOD + region expansion for the new view

@@ -102,6 +102,7 @@ export default function App() {
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const bboxCache = useRef<Map<string, [number, number, number, number]>>(new Map());
+  const underlays = useRef(new WeakMap<CountryFeature, CountryFeature>());
   const lodTimer = useRef<number | null>(null);
   const loaded1 = useRef<Set<string>>(new Set());
   const loaded2 = useRef<Set<string>>(new Set());
@@ -349,11 +350,19 @@ export default function App() {
 
   const displayFeatures = useMemo(() => {
     const out: CountryFeature[] = [];
+    // An expanded country keeps its own outline underneath its regions. The regions come
+    // from a different dataset than the neighbours' outlines, so their borders don't quite
+    // meet, and without this the dark globe shows through the gaps as black specks.
+    const under = (f: CountryFeature): CountryFeature => {
+      let u = underlays.current.get(f);
+      if (!u) { u = { ...f, underlay: true }; underlays.current.set(f, u); }
+      return u;
+    };
     for (const f of worldFeatures) {
       const lvl = expanded[f.id];
       if (!lvl) { out.push(f); continue; }
-      if (lvl === 2 && regions2[f.id]) out.push(...regions2[f.id]);
-      else if (regions1[f.id]) out.push(...regions1[f.id]);
+      const regs = lvl === 2 && regions2[f.id] ? regions2[f.id] : regions1[f.id];
+      if (regs) out.push(under(f), ...regs);
       else out.push(f);
     }
     return out;

@@ -101,6 +101,12 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .polygonSideColor(() => null as unknown as string)
       .polygonStrokeColor(strokeColor)
       .polygonAltitude(0.002)
+      // Caps are flat triangles sitting 0.2 units above the sphere. A triangle spanning
+      // theta degrees dips r*theta^2/8 below the curved surface, so any wider than ~7 deg
+      // sinks under the globe and shows as a black hole. The 5-deg default still left holes
+      // in huge high-latitude polygons (Greenland, Siberia, the Canadian Arctic), whose
+      // triangulation stretches near the pole; 3 deg (dip ~0.03) keeps every cap above.
+      .polygonCapCurvatureResolution(3)
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))
       .onPolygonHover((d: unknown) => {
         // No recolor here (that re-renders every polygon per hover = laggy).
@@ -185,6 +191,12 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     };
     const onPointerDown = () => { controls.autoRotate = false; hideLabels(); wake(); };
     el.addEventListener('pointerdown', onPointerDown);
+    // The intro spin stops by itself after a few seconds. While it runs the globe renders
+    // every frame (measured ~71% main-thread on a phone-class CPU vs ~7% idle once it
+    // stops), so an untouched open app no longer keeps the phone busy and warm.
+    const spinTimer = window.setTimeout(() => {
+      if (controls.autoRotate) { controls.autoRotate = false; wake(); }
+    }, 8000);
     window.addEventListener('pointerup', restoreLabels);
     window.addEventListener('pointercancel', restoreLabels);
 
@@ -219,6 +231,7 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     return () => {
       ro.disconnect();
       clearTimeout(idleTimer);
+      clearTimeout(spinTimer);
       controls.removeEventListener?.('change', onChange);
       el.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointerup', restoreLabels);

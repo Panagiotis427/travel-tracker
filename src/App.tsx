@@ -911,7 +911,7 @@ export default function App() {
           </div>
         </div>
         <footer>{loading ? 'Loading globe…' : `${lod} · ${renderFeatures.length} shapes · zoom for regions`}</footer>
-        <div className="credit">Boundaries: Natural Earth (public domain) · geoBoundaries (CC BY 4.0)</div>
+        <div className="credit">Boundaries: Natural Earth (public domain) · geoBoundaries (CC BY 4.0) · build {import.meta.env.VITE_APP_BUILD as string}</div>
       </aside>
 
       <main className="map-wrap">

@@ -63,6 +63,8 @@ const cspMeta: Plugin = {
 // sub-path, on any other static host, and as an installable desktop PWA.
 export default defineConfig({
   base: './',
+  // The build a device runs, shown in the sidebar: the commit in CI, "local" otherwise.
+  define: { 'import.meta.env.VITE_APP_BUILD': JSON.stringify(process.env.GITHUB_SHA?.slice(0, 7) || 'local') },
   // The lazily loaded globe chunk (three.js) is ~2 MB, so warn only when a chunk would outgrow the
   // service worker's precache limit (maximumFileSizeToCacheInBytes below) and stop working offline.
   build: { chunkSizeWarningLimit: 3000 },

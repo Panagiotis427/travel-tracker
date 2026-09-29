@@ -16,7 +16,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Manual UI (Tier 0): status + dates/duration/note per place | Done |
 | Persistence (IndexedDB) + JSON export/import | Done |
 | EXIF import (Tier 1): drop photos -> auto-mark countries + regions, read in background workers | Done (web) |
-| PWA: installable + offline (service worker) | Done |
+| PWA: installable + offline (service worker); an open page switches to a new deploy by itself, and the sidebar shows the build | Done |
 | Polish: day/night globe, city/capital markers, multiple trips, mark-my-location | Done |
 | Unified zoom-LOD (countries -> Admin-1 -> Admin-2 counties, optional and viewport-culled), no drill modes | Done |
 | 2D map view (canvas, no three.js) for weak devices | Done |

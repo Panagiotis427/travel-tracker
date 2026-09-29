@@ -16,7 +16,9 @@ import { getUserVisits, putUserVisit, deleteUserVisit, clearUserVisits, putUserM
 import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { pullRemote, pushRemote, deleteRemote, deleteClearedRemote, deleteAllRemote } from './state/cloud';
-import { loadPending, addTombstone, dropTombstone, markDirty, clearDirty, hasPending, markCleared, confirmCleared, applyTombstones } from './state/pending';
+import { loadPending, addTombstone, dropTombstone, markDirty, hasPending, markCleared, confirmCleared, applyTombstones } from './state/pending';
+import { flushPending } from './state/sync';
+import type { SyncState } from './state/sync';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
 import PasswordDialog from './features/PasswordDialog';
@@ -95,7 +97,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
-  const [syncState, setSyncState] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
+  const [syncState, setSyncState] = useState<SyncState>('synced');
+  const [pullTry, setPullTry] = useState(0); // bumped to retry a sign-in pull that failed
   const [pwDialog, setPwDialog] = useState<'change' | 'recovery' | null>(null);
   const [guestToast, setGuestToast] = useState(false);
   const guestWarned = useRef(false);
@@ -108,7 +111,7 @@ export default function App() {
   const loaded2 = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const userIdRef = useRef<string | null>(null);
-  const syncedFor = useRef<string | null>(null);
+  const syncedFor = useRef<string | null>(null); // whose sign-in pull is running or done; null again if it failed
   const visitsRef = useRef<VisitMap>({}); // latest marks, for retries fired outside React (the 'online' event)
   visitsRef.current = visits;
 
@@ -224,25 +227,21 @@ export default function App() {
   // device never overwrites another device's rows for places it didn't change.
   async function flushSync(uid: string, map: VisitMap) {
     if (!cloudEnabled) return;
-    let p = loadPending(uid);
-    if (!hasPending(p)) { setSyncState('synced'); return; }
+    // Until the sign-in pull succeeds, other devices' marks may be missing here: never "Synced".
+    const settled = (s: SyncState): SyncState =>
+      s !== 'synced' || syncedFor.current === uid ? s : navigator.onLine === false ? 'offline' : 'error';
+    if (!hasPending(loadPending(uid))) { setSyncState(settled('synced')); return; }
     setSyncState('syncing');
-    if (p.clearedAt && (await deleteClearedRemote(p.clearedAt))) confirmCleared(uid, p.clearedAt);
-    for (const [id, at] of Object.entries(p.dels)) {
-      if (await deleteRemote(id, at)) dropTombstone(uid, id);
-    }
-    const gone = p.dirty.filter((id) => !map[id]); // unmarked since: its tombstone covers it
-    if (gone.length) clearDirty(uid, gone);
-    const ids = p.dirty.filter((id) => map[id]);
-    if (ids.length && (await pushRemote(uid, Object.fromEntries(ids.map((id) => [id, map[id]]))))) {
-      // Only clear what is still the version we sent: a place re-edited mid-push stays dirty.
-      clearDirty(uid, ids.filter((id) => visitsRef.current[id]?.updatedAt === map[id].updatedAt));
-    }
-    p = loadPending(uid);
-    setSyncState(!hasPending(p) ? 'synced' : navigator.onLine === false ? 'offline' : 'error');
+    setSyncState(settled(await flushPending(uid, map, {
+      deleteCleared: deleteClearedRemote,
+      deleteOne: deleteRemote,
+      push: pushRemote,
+      latest: () => visitsRef.current,
+      online: () => navigator.onLine !== false,
+    })));
   }
 
-  // On login: pull the user's cloud data, merge (last-write-wins), push the union.
+  // On login: pull the user's cloud data, merge it (last write wins), push what the cloud lacks.
   // Without Supabase keys there are no accounts, so marks are saved on the device under LOCAL_UID.
   useEffect(() => {
     const uid = session?.user?.id ?? (cloudEnabled ? null : LOCAL_UID);
@@ -251,7 +250,26 @@ export default function App() {
     if (syncedFor.current === uid) return;
     syncedFor.current = uid;
     (async () => {
-      const [local, remoteRaw] = await Promise.all([getUserVisits(uid), pullRemote()]);
+      const pull = pullRemote();
+      // This device's marks show at once; the cloud's are merged in when the pull returns
+      // (which, offline or on a failing server, takes several seconds of retries).
+      const shown = await getUserVisits(uid);
+      if (userIdRef.current !== uid) return; // signed out or switched accounts meanwhile
+      setVisits(shown);
+      const remoteRaw = await pull;
+      // Read again once the pull is back, so edits made while it ran are part of the merge
+      // instead of being overwritten by an older copy.
+      const local = await getUserVisits(uid);
+      if (userIdRef.current !== uid) return;
+      if (!remoteRaw) {
+        // The cloud couldn't be read: keep this device's marks and send only what it changed
+        // (merging "unreadable" as "empty" would re-push every row over newer ones). The
+        // pull is retried when the device comes back online, on the next sign-in or reload.
+        syncedFor.current = null;
+        setVisits(local);
+        void flushSync(uid, local);
+        return;
+      }
       // Rows this device deleted while offline must not come back from the cloud; a newer
       // re-mark from another device wins and retires its tombstone.
       const { kept: remote, stale } = applyTombstones(remoteRaw, loadPending(uid));
@@ -272,7 +290,7 @@ export default function App() {
       void putUserMany(uid, merged);
       void flushSync(uid, merged);
     })();
-  }, [session]);
+  }, [session, pullTry]);
 
   // Mirror local changes to the cloud (debounced) while logged in.
   useEffect(() => {
@@ -291,9 +309,14 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [guestToast]);
 
-  // Back online: retry whatever failed while offline.
+  // Back online: retry whatever failed while offline, starting with a failed sign-in pull.
   useEffect(() => {
-    const onOnline = () => { const uid = userIdRef.current; if (uid) void flushSync(uid, visitsRef.current); };
+    const onOnline = () => {
+      const uid = userIdRef.current;
+      if (!uid) return;
+      if (syncedFor.current !== uid) setPullTry((n) => n + 1);
+      else void flushSync(uid, visitsRef.current);
+    };
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
     // eslint-disable-next-line react-hooks/exhaustive-deps

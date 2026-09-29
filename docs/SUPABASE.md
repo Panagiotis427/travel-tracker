@@ -108,7 +108,10 @@ you want it fully in-app later.
 - Sharing (link overlays) is unchanged and works with or without accounts.
 - Sync is last-write-wins per place (by `updated_at`), and a device sends only the
   places it changed, so it never overwrites another device's newer marks. Each
-  account's marks are also stored on the device: changes and deletes made offline (or
-  while the server is unreachable) wait there and are retried after sign-in, on the next
-  change and when the connection returns, and the Account box shows whether everything
-  is synced. Signed out, nothing is saved, and the app says so at the first mark.
+  account's marks are also stored on the device and show at once: changes and deletes
+  made offline (or while the server is unreachable) wait there and are retried after
+  sign-in, on the next change and when the connection returns, and the Account box says
+  "Synced" only once the device has sent its changes and received the cloud's marks.
+  Signed out, nothing is saved, and the app says so at the first mark.
+- The app reads an account's marks in pages of 1000 rows, the project's default API
+  **Max rows** setting, so keep that setting at 1000 or more.

@@ -1,6 +1,63 @@
+import { readFile } from 'node:fs/promises';
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { startThreeGlobeTickersPaused, EXPECTED_SITES, THREE_GLOBE_ENTRY } from './src/build/threeGlobeTickers';
+
+// Start three-globe's layer tickers paused (see src/build/threeGlobeTickers.ts). The build
+// fails if the number of patched sites changes, so a three-globe upgrade can't silently
+// bring back the idle requestAnimationFrame loops.
+function patchedThreeGlobe(code: string, where: string): string {
+  const r = startThreeGlobeTickersPaused(code);
+  if (r.count !== EXPECTED_SITES) {
+    throw new Error(`three-globe ticker patch: expected ${EXPECTED_SITES} FrameTicker sites, found ${r.count} in ${where}; review src/build/threeGlobeTickers.ts`);
+  }
+  return r.code;
+}
+let sawThreeGlobe = false;
+const pauseThreeGlobeTickers: Plugin = {
+  name: 'pause-three-globe-tickers',
+  apply: 'build', // dev pre-bundling is patched by the esbuild hook in optimizeDeps below
+  enforce: 'pre',
+  transform(code, id) {
+    if (!THREE_GLOBE_ENTRY.test(id.split('?')[0])) return null;
+    sawThreeGlobe = true;
+    return { code: patchedThreeGlobe(code, id), map: null };
+  },
+  // A patch that silently stops matching would ship the idle loops again: fail instead.
+  buildEnd(err) {
+    if (!err && !sawThreeGlobe) this.error('three-globe ticker patch: three-globe was never transformed; check THREE_GLOBE_ENTRY in src/build/threeGlobeTickers.ts');
+  },
+};
+
+// Content-Security-Policy for the built app. GitHub Pages can't send headers, so it's a
+// <meta> tag, injected at build time only: the dev server relies on an inline script
+// (React refresh) that script-src 'self' would block. connect-src allows Supabase by
+// wildcard so no project identifier lives in the repo.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://*.supabase.co",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+const CHARSET = /<meta\s+charset=[^>]*>/i;
+const cspMeta: Plugin = {
+  name: 'csp-meta',
+  apply: 'build',
+  // Straight after <meta charset> (which stays first) and before anything that loads.
+  transformIndexHtml(html) {
+    if (!CHARSET.test(html)) throw new Error('csp-meta: no <meta charset> in index.html to anchor the CSP after');
+    return html.replace(CHARSET, (m) => `${m}\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`);
+  },
+};
 
 // base './' keeps asset paths relative so the same build works on Cloudflare/GitHub
 // Pages, inside a Capacitor Android wrapper, and as an installable desktop PWA.
@@ -11,7 +68,24 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 3000 },
   server: { port: 5180, strictPort: false },
   preview: { port: 4180, strictPort: false },
+  // The dev server pre-bundles dependencies with esbuild, which skips Vite transforms, so
+  // apply the same patch there too and keep `npm run dev` identical to the build.
+  optimizeDeps: {
+    esbuildOptions: {
+      plugins: [{
+        name: 'pause-three-globe-tickers',
+        setup(b) {
+          b.onLoad({ filter: THREE_GLOBE_ENTRY }, async (args) => ({
+            contents: patchedThreeGlobe(await readFile(args.path, 'utf8'), args.path),
+            loader: 'js',
+          }));
+        },
+      }],
+    },
+  },
   plugins: [
+    pauseThreeGlobeTickers,
+    cspMeta,
     react(),
     VitePWA({
       registerType: 'autoUpdate',

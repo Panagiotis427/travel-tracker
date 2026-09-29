@@ -11,8 +11,8 @@ tools/geo-pipeline/.admin2.err
 # os
 Thumbs.db
 .DS_Store
-# app build dirs
-build/
+# app build dirs (root only: src/build/ holds build-time source)
+/build/
 dist/
 dev-dist/
 .dart_tool/

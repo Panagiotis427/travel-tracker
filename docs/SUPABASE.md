@@ -92,11 +92,12 @@ and the live site gets login too.
 The login screen has "Forgot password?" which emails a reset link. For the link to
 return to the app, add your URLs to the allowlist: Dashboard -> **Authentication ->
 URL Configuration** -> add the Site URL (the live GitHub Pages URL) and
-`http://localhost:5173`. Clicking the link reopens the app, which then prompts for a
-new password.
+`http://localhost:5180`. Clicking the link reopens the app, which then opens a form to
+choose a new password (entered twice).
 
 ## Deleting an account
-The in-app **Delete account** removes your data from the cloud and signs you out.
+The in-app **Delete account** removes your data from the cloud and signs you out; if the
+server can't be reached it deletes nothing, keeps you signed in and says so.
 Removing the login itself (the auth user) is done from the dashboard:
 **Authentication -> Users -> (row) -> Delete user**, or via a small Edge Function if
 you want it fully in-app later.
@@ -105,5 +106,9 @@ you want it fully in-app later.
 - "Remember me" is on by default: the session is stored on the device and survives
   reloads/reboots until you log out.
 - Sharing (link overlays) is unchanged and works with or without accounts.
-- Sync is last-write-wins per place (by `updated_at`). Each account's marks are also
-  stored on the device; signed out, nothing is saved.
+- Sync is last-write-wins per place (by `updated_at`), and a device sends only the
+  places it changed, so it never overwrites another device's newer marks. Each
+  account's marks are also stored on the device: changes and deletes made offline (or
+  while the server is unreachable) wait there and are retried after sign-in, on the next
+  change and when the connection returns, and the Account box shows whether everything
+  is synced. Signed out, nothing is saved, and the app says so at the first mark.

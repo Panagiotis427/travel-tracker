@@ -38,6 +38,7 @@ const WELCOME_KEY = 'travel-tracker:welcome';
 const MARKER_KEY = 'travel-tracker:markers';
 const COUNTIES_KEY = 'travel-tracker:counties2'; // v2: default ON now that counties are viewport-culled
 const VIEW_KEY = 'travel-tracker:view';
+const LOCAL_UID = 'local'; // the single owner of the marks in a build without Supabase keys
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
 
@@ -126,7 +127,8 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
     loadWorld('110m').finally(() => setLoading(false));
-    // Visits are loaded per-account on login; guests start empty and save nothing.
+    // Visits are loaded per account on login, or for LOCAL_UID when there are no accounts;
+    // guests start empty and save nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -208,8 +210,9 @@ export default function App() {
   }, [authReady, session]);
 
   // On login: pull the user's cloud data, merge (last-write-wins), push the union.
+  // Without Supabase keys there are no accounts, so marks are saved on the device under LOCAL_UID.
   useEffect(() => {
-    const uid = session?.user?.id ?? null;
+    const uid = session?.user?.id ?? (cloudEnabled ? null : LOCAL_UID);
     userIdRef.current = uid;
     if (!uid) { syncedFor.current = null; setVisits({}); return; } // guest / logged out = empty, nothing saved
     if (syncedFor.current === uid) return;

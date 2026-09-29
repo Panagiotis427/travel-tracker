@@ -33,7 +33,7 @@ npm run build      # production build to dist/
 npm run typecheck  # tsc --noEmit
 ```
 
-Tap a country to cycle its status (visited -> want -> lived -> clear). Drag to rotate, scroll to zoom. Marks persist in localStorage.
+Tap a country to cycle its status (visited -> want -> lived -> clear). Drag to rotate, scroll to zoom. Marks are saved on the device (IndexedDB); with Supabase keys set, per signed-in account and synced (`docs/SUPABASE.md`).
 
 ## Rebuild the geo assets
 
@@ -62,7 +62,9 @@ travel-tracker/
       pip.ts               ray-cast point-in-polygon (for EXIF/GPS classification)
       projection.ts        equirectangular forward/inverse (2D view)
       types.ts
-    state/status.ts        status model, colors, localStorage
+    state/status.ts        status model, colors
+    state/db.ts            IndexedDB storage, per account
+    state/cloud.ts         optional Supabase sync
   public/
     geo/*.topojson         served geometry
     textures/earth-dark.jpg globe base texture (93 KB, offline)

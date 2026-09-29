@@ -1,6 +1,7 @@
 // Local-first persistence in IndexedDB, SCOPED PER USER. Keys are `${uid}::${placeId}`
 // so accounts never see each other's data. Guests (no uid) are handled by the caller:
-// nothing is written, so "continue without an account" saves nothing.
+// nothing is written, so "continue without an account" saves nothing. A build without
+// Supabase keys has no accounts and saves everything under one local id.
 import { openDB } from 'idb';
 import type { IDBPDatabase } from 'idb';
 import type { Visit, VisitMap } from './status';

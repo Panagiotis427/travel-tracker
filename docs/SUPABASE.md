@@ -1,8 +1,10 @@
 # Accounts + cloud sync (Supabase, $0)
 
-The app runs fully local with no accounts. Adding a free Supabase project turns on
-email/password login, "remember me" (session persists on the device), and per-user
-sync (your marks follow you across devices). Without the keys, nothing changes.
+Without Supabase keys the app runs fully local with no accounts and saves marks on the
+device. Adding a free Supabase project turns on email/password login, "remember me"
+(session persists on the device), and per-user sync (your marks follow you across
+devices). Marks are then saved per account: a visitor who continues without an account
+can look around but saves nothing.
 
 ## 1. Create an organization, then a project
 New accounts create an **organization** first — it is just a container; the
@@ -103,4 +105,5 @@ you want it fully in-app later.
 - "Remember me" is on by default: the session is stored on the device and survives
   reloads/reboots until you log out.
 - Sharing (link overlays) is unchanged and works with or without accounts.
-- Sync is last-write-wins per place (by `updated_at`); local-first when logged out.
+- Sync is last-write-wins per place (by `updated_at`). Each account's marks are also
+  stored on the device; signed out, nothing is saved.

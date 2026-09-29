@@ -36,13 +36,20 @@ create policy "own visits" on public.visits
   for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- Data API access. Since 30 October 2026 Supabase no longer grants it to new public tables
+-- by itself; signed-in users need it, signed-out visitors (anon) have no rows and get none.
+grant select, insert, update, delete on public.visits to authenticated;
+grant select, insert, update, delete on public.visits to service_role;
 ```
 
 (The `drop policy if exists` makes it safe to re-run. If you saw
 `policy "own visits" ... already exists`, it just means it was already created —
 the setup is done.)
 
-Row-level security means each user can only read/write their own rows.
+Row-level security means each user can only read/write their own rows. The two `grant` lines
+let the Data API reach the table at all: a project created before 30 October 2026 already has them,
+so re-running the block there changes nothing.
 
 ## 3. (Optional) instant signup
 Dashboard -> **Authentication -> Providers -> Email** -> turn **Confirm email OFF**

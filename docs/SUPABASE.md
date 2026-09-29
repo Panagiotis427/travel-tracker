@@ -28,6 +28,7 @@ create table if not exists public.visits (
   status     text not null,
   trips      jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now(),
+  deleted_at timestamptz,  -- set when the place is deleted, so other devices drop it too
   primary key (user_id, place_id)
 );
 
@@ -39,7 +40,7 @@ create policy "own visits" on public.visits
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
--- Data API access. Since 30 October 2026 Supabase no longer grants it to new public tables
+-- Data API access. From 30 October 2026 Supabase no longer grants it to new public tables
 -- by itself; signed-in users need it, signed-out visitors (anon) have no rows and get none.
 grant select, insert, update, delete on public.visits to authenticated;
 grant select, insert, update, delete on public.visits to service_role;
@@ -51,7 +52,8 @@ the setup is done.)
 
 Row-level security means each user can only read/write their own rows. The two `grant` lines
 let the Data API reach the table at all: a project created before 30 October 2026 already has them,
-so re-running the block there changes nothing.
+so re-running the block there changes nothing. A table created before `deleted_at` existed gains
+it with `alter table public.visits add column if not exists deleted_at timestamptz; notify pgrst, 'reload schema';`.
 
 ## 3. (Optional) instant signup
 Dashboard -> **Authentication -> Providers -> Email** -> turn **Confirm email OFF**
@@ -107,7 +109,9 @@ you want it fully in-app later.
   reloads/reboots until you log out.
 - Sharing (link overlays) is unchanged and works with or without accounts.
 - Sync is last-write-wins per place (by `updated_at`), and a device sends only the
-  places it changed, so it never overwrites another device's newer marks. Each
+  places it changed, so it never overwrites another device's newer marks. A delete keeps
+  the place's row with `deleted_at` set, so a device that still holds the place drops it
+  at its next sync instead of bringing it back, and a later re-mark wins over it. Each
   account's marks are also stored on the device and show at once: changes and deletes
   made offline (or while the server is unreachable) wait there and are retried after
   sign-in, on the next change and when the connection returns, and the Account box says

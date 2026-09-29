@@ -15,9 +15,9 @@ import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
 import { getUserVisits, putUserVisit, deleteUserVisit, clearUserVisits, putUserMany } from './state/db';
 import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import { pullRemote, pushRemote, deleteRemote, deleteClearedRemote, deleteAllRemote } from './state/cloud';
-import { loadPending, addTombstone, dropTombstone, markDirty, hasPending, markCleared, confirmCleared, applyTombstones } from './state/pending';
-import { flushPending } from './state/sync';
+import { pullRemote, pullPlaces, pushRemote, deleteRemote, deleteClearedRemote, deleteAllRemote } from './state/cloud';
+import { loadPending, addTombstone, dropTombstone, markDirty, clearDirty, hasPending, markCleared, confirmCleared } from './state/pending';
+import { flushPending, mergeSignIn } from './state/sync';
 import type { SyncState } from './state/sync';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
@@ -224,7 +224,7 @@ export default function App() {
   // Send everything the cloud hasn't confirmed yet: a pending "clear all", pending deletes,
   // then ONLY the places changed on this device. Used after sign-in, after edits and when
   // the device comes back online, so work done offline is never silently lost, and a stale
-  // device never overwrites another device's rows for places it didn't change.
+  // device never overwrites another device's newer rows or brings back a place deleted there.
   async function flushSync(uid: string, map: VisitMap) {
     if (!cloudEnabled) return;
     // Until the sign-in pull succeeds, other devices' marks may be missing here: never "Synced".
@@ -235,10 +235,24 @@ export default function App() {
     setSyncState(settled(await flushPending(uid, map, {
       deleteCleared: deleteClearedRemote,
       deleteOne: deleteRemote,
+      check: pullPlaces,
       push: pushRemote,
+      adopt: (drop, take) => adoptCloud(uid, drop, take),
       latest: () => visitsRef.current,
       online: () => navigator.onLine !== false,
     })));
+  }
+
+  // The cloud won these places during a sync: drop the ones deleted there, keep its newer versions.
+  function adoptCloud(uid: string, drop: string[], take: VisitMap) {
+    if (userIdRef.current !== uid) return;
+    for (const id of drop) void deleteUserVisit(uid, id);
+    for (const [id, v] of Object.entries(take)) void putUserVisit(uid, id, v);
+    setVisits((prev) => {
+      const next = { ...prev, ...take };
+      for (const id of drop) delete next[id];
+      return next;
+    });
   }
 
   // On login: pull the user's cloud data, merge it (last write wins), push what the cloud lacks.
@@ -270,24 +284,15 @@ export default function App() {
         void flushSync(uid, local);
         return;
       }
-      // Rows this device deleted while offline must not come back from the cloud; a newer
-      // re-mark from another device wins and retires its tombstone.
-      const { kept: remote, stale } = applyTombstones(remoteRaw, loadPending(uid));
-      for (const id of stale) dropTombstone(uid, id);
-      const merged: VisitMap = { ...local };
-      for (const [id, rv] of Object.entries(remote)) {
-        const cur = merged[id];
-        if (!cur || isoTime(rv.updatedAt) > isoTime(cur.updatedAt)) merged[id] = rv;
-      }
       // Push only local rows the cloud lacks or holds an older version of (e.g. edited here
-      // offline); rows the cloud already has at least as new are left alone.
-      if (cloudEnabled) {
-        markDirty(uid, Object.entries(local)
-          .filter(([id, lv]) => !remote[id] || isoTime(lv.updatedAt) > isoTime(remote[id].updatedAt))
-          .map(([id]) => id));
-      }
+      // offline), and drop the places deleted on another device since this one last
+      // changed them, instead of pushing them back.
+      const { merged, push, drop, stale } = mergeSignIn(local, remoteRaw, loadPending(uid));
+      for (const id of stale) dropTombstone(uid, id);
+      if (cloudEnabled) { markDirty(uid, push); clearDirty(uid, drop); }
       setVisits(merged);
       void putUserMany(uid, merged);
+      for (const id of drop) void deleteUserVisit(uid, id);
       void flushSync(uid, merged);
     })();
   }, [session, pullTry]);

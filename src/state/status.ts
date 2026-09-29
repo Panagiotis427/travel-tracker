@@ -19,6 +19,12 @@ export interface Visit {
 
 export type VisitMap = Record<string, Visit>;
 
+/** The cloud's side of a sync: its live marks, and when each place it deleted was deleted. */
+export interface CloudMarks {
+  live: VisitMap;
+  deleted: Record<string, string>;
+}
+
 export const STATUS_META: Record<Status, { label: string; color: string }> = {
   visited: { label: 'Visited', color: '#3498db' },
   want: { label: 'Want to go', color: '#e67e22' },

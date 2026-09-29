@@ -1,8 +1,7 @@
 import { feature } from 'topojson-client';
-import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from 'geojson';
+import type { Feature, FeatureCollection, Polygon, MultiPolygon } from 'geojson';
 import type { Region } from './types';
 import { bboxOf } from './pip';
-import { lonLatToBase } from './projection';
 
 /** Properties we keep from Natural Earth (admin-0 UPPERCASE, admin-1 lowercase). */
 export interface GeoProps {
@@ -59,23 +58,7 @@ export async function loadAdmin2(a3: string): Promise<CountryFeature[]> {
   return loadFeatures(import.meta.env.BASE_URL + `geo/admin2/${a3}.topojson`);
 }
 
-// --- 2D canvas path (kept for the flat view + EXIF point-in-polygon) ---------
-function addRing(path: Path2D, ring: Position[]): void {
-  for (let i = 0; i < ring.length; i++) {
-    const [x, y] = lonLatToBase(ring[i][0], ring[i][1]);
-    if (i === 0) path.moveTo(x, y);
-    else path.lineTo(x, y);
-  }
-  path.closePath();
-}
-
-function buildPath(geom: Polygon | MultiPolygon): Path2D {
-  const path = new Path2D();
-  if (geom.type === 'Polygon') for (const ring of geom.coordinates) addRing(path, ring);
-  else for (const poly of geom.coordinates) for (const ring of poly) addRing(path, ring);
-  return path;
-}
-
+// --- point-in-polygon index (EXIF/GPS marking + which country the view is over) ---
 export async function loadRegions(url: string): Promise<Region[]> {
   const feats = await fetchFeatures(url);
   return feats.map((f) => {
@@ -85,7 +68,6 @@ export async function loadRegions(url: string): Promise<Region[]> {
       name: (f.properties?.NAME as string) ?? String(f.id),
       bbox: bboxOf(geom),
       geom,
-      path: buildPath(geom),
     };
   });
 }

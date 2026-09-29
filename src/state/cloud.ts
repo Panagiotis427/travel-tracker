@@ -1,7 +1,7 @@
 // Cloud sync (Supabase). Row-level security scopes every query to the logged-in
 // user, so selects need no filter; writes include user_id to satisfy the policy.
 import { supabase } from '../lib/supabase';
-import type { Status, Visit, VisitMap } from './status';
+import type { Status, VisitMap } from './status';
 import { normalizeVisit } from './status';
 
 interface Row { user_id?: string; place_id: string; status: string; trips: unknown; updated_at: string; }
@@ -39,11 +39,6 @@ export async function pushRemote(userId: string, map: VisitMap): Promise<boolean
   const rows = toRows(userId, map);
   if (!rows.length) return true;
   return ok(supabase.from('visits').upsert(rows, { onConflict: 'user_id,place_id' }));
-}
-
-export async function upsertRemote(userId: string, id: string, v: Visit): Promise<void> {
-  if (!supabase) return;
-  await supabase.from('visits').upsert(toRows(userId, { [id]: v }), { onConflict: 'user_id,place_id' });
 }
 
 /** Delete one place, unless the stored row is newer than our delete (last write wins). */

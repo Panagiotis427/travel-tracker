@@ -8,6 +8,4 @@ export interface Region {
   name: string;
   bbox: BBox;
   geom: Polygon | MultiPolygon;
-  /** Pre-projected path in base world units (see projection.ts). */
-  path: Path2D;
 }

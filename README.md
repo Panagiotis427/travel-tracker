@@ -21,7 +21,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Unified zoom-LOD (countries -> Admin-1 -> Admin-2 counties, optional and viewport-culled), no drill modes | Done |
 | 2D map view (canvas, no three.js) for weak devices | Done |
 | Multi-person share links + compare overlays (no backend) | Done |
-| Accounts + cloud sync (Supabase, optional): offline edits and deletes retried, sync status shown | Live; without keys marks stay on the device (`docs/SUPABASE.md`) |
+| Accounts + cloud sync (Supabase, optional): offline edits and deletes retried, a delete sticks on every device, sync status shown | Live; without keys marks stay on the device (`docs/SUPABASE.md`) |
 | Unit tests (Vitest) + CI | Done |
 | Deploy: GitHub Pages on every push to `main`; desktop = install the site as a PWA | Live — see `docs/DEPLOY.md` |
 
@@ -66,11 +66,14 @@ travel-tracker/
       pip.ts               ray-cast point-in-polygon
       projection.ts        equirectangular forward/inverse (2D map)
       types.ts
-    features/              sign-in screen, password dialog, photo import, background GPS
+    features/              sign-in screen, password and share dialogs, photo import
+                           (EXIF read in a worker pool), background GPS (unused)
+    build/                 build-time patch that starts three-globe's layer tickers paused
     lib/                   share links, fit-to-view maths, dates, Supabase client
     state/status.ts        status model, colors
     state/db.ts            IndexedDB storage, per account
-    state/cloud.ts         optional Supabase sync
+    state/cloud.ts         optional Supabase sync: pull, push, soft deletes
+    state/sync.ts          sign-in merge and flush, last write wins against the cloud
     state/pending.ts       unconfirmed deletes + changed places, retried until synced
     **/*.test.ts           unit tests (Vitest)
   public/

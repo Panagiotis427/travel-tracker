@@ -8,7 +8,7 @@ import { initCountryIndex, classifyCountry, classifyRegion } from './map/classif
 import { bboxOf } from './map/pip';
 import { boundsOf } from './lib/geo-util';
 import type { Pov, Bounds } from './lib/geo-util';
-import { durationDays, fmtDuration, minIso, maxIso, isoDate } from './lib/dates';
+import { durationDays, fmtDuration, minIso, maxIso, isoDate, isoTime } from './lib/dates';
 import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
@@ -16,9 +16,10 @@ import { getUserVisits, putUserVisit, deleteUserVisit, clearUserVisits, putUserM
 import { supabase, cloudEnabled } from './lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { pullRemote, pushRemote, deleteRemote, deleteClearedRemote, deleteAllRemote } from './state/cloud';
-import { loadPending, addTombstone, dropTombstone, markCleared, confirmCleared, applyTombstones } from './state/pending';
+import { loadPending, addTombstone, dropTombstone, markDirty, clearDirty, hasPending, markCleared, confirmCleared, applyTombstones } from './state/pending';
 import type { AggMap } from './features/ImportPhotos';
 import AuthScreen from './features/AuthScreen';
+import PasswordDialog from './features/PasswordDialog';
 import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
 import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
@@ -94,6 +95,10 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
+  const [syncState, setSyncState] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
+  const [pwDialog, setPwDialog] = useState<'change' | 'recovery' | null>(null);
+  const [guestToast, setGuestToast] = useState(false);
+  const guestWarned = useRef(false);
 
   const admin0Cache = useRef<Map<Lod, CountryFeature[]>>(new Map());
   const bboxCache = useRef<Map<string, [number, number, number, number]>>(new Map());
@@ -200,10 +205,7 @@ export default function App() {
       .finally(() => setAuthReady(true)); // never leave the app waiting on auth
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
-      if (event === 'PASSWORD_RECOVERY') {
-        const np = window.prompt('Enter a new password (at least 6 characters):');
-        if (np) void supabase!.auth.updateUser({ password: np }).then(({ error }) => window.alert(error ? error.message : 'Password updated.'));
-      }
+      if (event === 'PASSWORD_RECOVERY') setPwDialog('recovery'); // opened from a reset e-mail link
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -216,16 +218,27 @@ export default function App() {
   }, [authReady, session]);
 
   // Send everything the cloud hasn't confirmed yet: a pending "clear all", pending deletes,
-  // then the current marks. Used after sign-in, after edits, and when the device comes back
-  // online, so work done offline (or while the server was paused) is never silently lost.
+  // then ONLY the places changed on this device. Used after sign-in, after edits and when
+  // the device comes back online, so work done offline is never silently lost, and a stale
+  // device never overwrites another device's rows for places it didn't change.
   async function flushSync(uid: string, map: VisitMap) {
     if (!cloudEnabled) return;
-    const p = loadPending(uid);
+    let p = loadPending(uid);
+    if (!hasPending(p)) { setSyncState('synced'); return; }
+    setSyncState('syncing');
     if (p.clearedAt && (await deleteClearedRemote(p.clearedAt))) confirmCleared(uid, p.clearedAt);
     for (const [id, at] of Object.entries(p.dels)) {
       if (await deleteRemote(id, at)) dropTombstone(uid, id);
     }
-    await pushRemote(uid, map);
+    const gone = p.dirty.filter((id) => !map[id]); // unmarked since: its tombstone covers it
+    if (gone.length) clearDirty(uid, gone);
+    const ids = p.dirty.filter((id) => map[id]);
+    if (ids.length && (await pushRemote(uid, Object.fromEntries(ids.map((id) => [id, map[id]]))))) {
+      // Only clear what is still the version we sent: a place re-edited mid-push stays dirty.
+      clearDirty(uid, ids.filter((id) => visitsRef.current[id]?.updatedAt === map[id].updatedAt));
+    }
+    p = loadPending(uid);
+    setSyncState(!hasPending(p) ? 'synced' : navigator.onLine === false ? 'offline' : 'error');
   }
 
   // On login: pull the user's cloud data, merge (last-write-wins), push the union.
@@ -245,7 +258,14 @@ export default function App() {
       const merged: VisitMap = { ...local };
       for (const [id, rv] of Object.entries(remote)) {
         const cur = merged[id];
-        if (!cur || (rv.updatedAt ?? '') > (cur.updatedAt ?? '')) merged[id] = rv;
+        if (!cur || isoTime(rv.updatedAt) > isoTime(cur.updatedAt)) merged[id] = rv;
+      }
+      // Push only local rows the cloud lacks or holds an older version of (e.g. edited here
+      // offline); rows the cloud already has at least as new are left alone.
+      if (cloudEnabled) {
+        markDirty(uid, Object.entries(local)
+          .filter(([id, lv]) => !remote[id] || isoTime(lv.updatedAt) > isoTime(remote[id].updatedAt))
+          .map(([id]) => id));
       }
       setVisits(merged);
       void putUserMany(uid, merged);
@@ -257,10 +277,18 @@ export default function App() {
   useEffect(() => {
     const uid = userIdRef.current;
     if (!uid) return;
+    if (cloudEnabled && hasPending(loadPending(uid))) setSyncState('syncing');
     const t = window.setTimeout(() => void flushSync(uid, visits), 800);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visits]);
+
+  // The guest warning toast hides itself after a few seconds.
+  useEffect(() => {
+    if (!guestToast) return;
+    const t = window.setTimeout(() => setGuestToast(false), 8000);
+    return () => window.clearTimeout(t);
+  }, [guestToast]);
 
   // Back online: retry whatever failed while offline.
   useEffect(() => {
@@ -397,11 +425,12 @@ export default function App() {
 
   // Persist helpers: write locally (scoped to the signed-in user) and let the
   // debounced effect push to the cloud. Guests (no uid) save nothing.
-  // Re-marking a place makes it alive again, so any pending delete for it is retired.
+  // A changed place is marked dirty (pushed on the next sync); that also retires any
+  // pending delete for it, since re-marking makes it alive again.
   function pLocal(id: string, v: Visit) {
     const u = userIdRef.current; if (!u) return;
     void putUserVisit(u, id, v);
-    if (cloudEnabled) dropTombstone(u, id);
+    if (cloudEnabled) markDirty(u, [id]);
   }
   function pDelete(id: string) {
     const u = userIdRef.current; if (!u) return;
@@ -414,7 +443,15 @@ export default function App() {
   function pMany(map: VisitMap) {
     const u = userIdRef.current; if (!u) return;
     void putUserMany(u, map);
-    if (cloudEnabled) for (const id of Object.keys(map)) dropTombstone(u, id);
+    if (cloudEnabled) markDirty(u, Object.keys(map));
+  }
+
+  // On the synced site a signed-out visitor's marks live only in memory. Say so once, at
+  // their first mark, on the map itself (on a phone the sidebar notice sits in a drawer).
+  function warnGuestOnce() {
+    if (!cloudEnabled || userIdRef.current || guestWarned.current) return;
+    guestWarned.current = true;
+    setGuestToast(true);
   }
 
   function setStatus(id: string, status: Status | null) {
@@ -423,6 +460,7 @@ export default function App() {
       pDelete(id);
       return;
     }
+    warnGuestOnce();
     setVisits((prev) => {
       const next: Visit = { status, trips: prev[id]?.trips ?? [], updatedAt: new Date().toISOString() };
       pLocal(id, next);
@@ -463,12 +501,9 @@ export default function App() {
     syncedFor.current = null;
     setProfileMsg(null);
   }
-  async function changePassword() {
-    if (!supabase) return;
-    const np = window.prompt('New password (at least 6 characters):');
-    if (!np) return;
-    const { error } = await supabase.auth.updateUser({ password: np });
-    setProfileMsg(error ? error.message : 'Password updated.');
+  function changePassword() {
+    setProfileMsg(null);
+    setPwDialog('change');
   }
   function skipWelcome() {
     setShowAuth(false);
@@ -491,6 +526,7 @@ export default function App() {
   }
 
   function applyImport(agg: AggMap) {
+    warnGuestOnce();
     setVisits((prev) => {
       const now = new Date().toISOString();
       const copy = { ...prev };
@@ -515,6 +551,7 @@ export default function App() {
     if (!c) return null;
     const today = isoDate(new Date());
     const r = await classifyRegion(c.id, lng, lat);
+    warnGuestOnce();
     setVisits((prev) => {
       const now = new Date().toISOString();
       const copy = { ...prev };
@@ -603,6 +640,7 @@ export default function App() {
       try {
         const data = JSON.parse(String(reader.result)) as { visits?: Record<string, unknown> };
         const incoming = data.visits ?? {};
+        warnGuestOnce();
         setVisits((prev) => {
           const merged: VisitMap = { ...prev };
           const changed: VisitMap = {};
@@ -610,7 +648,7 @@ export default function App() {
             const v = normalizeVisit(raw);
             if (!v) continue;
             const cur = merged[id];
-            if (!cur || (v.updatedAt ?? '') > (cur.updatedAt ?? '')) { merged[id] = v; changed[id] = v; }
+            if (!cur || isoTime(v.updatedAt) > isoTime(cur.updatedAt)) { merged[id] = v; changed[id] = v; }
           }
           pMany(changed);
           return merged;
@@ -744,11 +782,20 @@ export default function App() {
                   <span className="acct-email">{session.user.email}</span>
                   <button className="io" onClick={logout}>Log out</button>
                 </div>
+                <div className={`sync-line sync-${syncState}`} role="status" aria-live="polite">
+                  {syncState === 'synced' ? 'Synced'
+                    : syncState === 'syncing' ? 'Saving…'
+                    : syncState === 'offline' ? 'Offline: saved on this device, syncs when you are back online'
+                    : 'Not synced yet: saved on this device, will retry'}
+                </div>
                 <button className="io" onClick={changePassword}>Change password</button>
                 <button className="io danger" onClick={deleteAccount}>Delete account</button>
               </>
             ) : (
-              <button className="io" onClick={() => setShowAuth(true)}>Sign in / Sign up</button>
+              <>
+                {authReady && <div className="guest-note">Not signed in: marks are not saved when you close the app.</div>}
+                <button className="io" onClick={() => setShowAuth(true)}>Sign in / Sign up</button>
+              </>
             )}
             {profileMsg && <div className="stat-label">{profileMsg}</div>}
           </div>
@@ -811,6 +858,13 @@ export default function App() {
       </aside>
 
       <main className="map-wrap">
+        {guestToast && (
+          <div className="guest-toast" role="status">
+            <span>Not signed in: this mark will not be kept.</span>
+            <button className="io" onClick={() => { setGuestToast(false); setShowAuth(true); }}>Sign in</button>
+            <button className="mb-x" onClick={() => setGuestToast(false)} aria-label="Dismiss">×</button>
+          </div>
+        )}
         {bannerName && (
           <div className="map-banner">
             <span className="mb-name">{bannerName}</span>
@@ -834,6 +888,7 @@ export default function App() {
       )}
 
       {showAuth && !session && cloudEnabled && <AuthScreen onSkip={skipWelcome} />}
+      {pwDialog && <PasswordDialog mode={pwDialog} onClose={(m) => { setPwDialog(null); if (m) setProfileMsg(m); }} />}
     </div>
   );
 }

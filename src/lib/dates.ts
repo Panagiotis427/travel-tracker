@@ -12,6 +12,16 @@ export function isoDate(d: Date): string {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
+/**
+ * ISO timestamp -> epoch ms (0 when missing/invalid). Sync compares INSTANTS this way,
+ * never strings: the client writes "...Z" but PostgREST returns "...+00:00", and
+ * comparing those strings can order two moments wrongly.
+ */
+export function isoTime(s?: string): number {
+  const n = s ? Date.parse(s) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function minIso(a?: string, b?: string): string | undefined {
   if (!a) return b;
   if (!b) return a;

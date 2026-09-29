@@ -625,6 +625,75 @@ footer {
 .auth-msg:empty {
   margin: 0; /* kept in the DOM (live region) but takes no space until it has text */
 }
+.auth-skip-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+  text-align: center;
+}
+
+/* signed-out notice + sync status (account area) */
+.guest-note {
+  color: #e7b95a;
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+.sync-line {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 8px;
+}
+.sync-line.sync-synced {
+  color: #6fcf97;
+}
+.sync-line.sync-offline,
+.sync-line.sync-error {
+  color: #e7b95a;
+}
+
+/* first-mark warning for signed-out visitors, on the map itself */
+.guest-toast {
+  position: absolute;
+  /* centred with auto margins, not left:50% + translate: that shrink-fits the box into
+     the remaining half of the width and crushes the text onto many lines */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: max-content;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  background: rgba(13, 33, 48, 0.95);
+  border: 1px solid rgba(231, 185, 90, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.guest-toast .io {
+  flex: none;
+  padding: 6px 12px;
+}
+
+/* in-app password dialog */
+.pw-modal {
+  width: min(380px, 100%);
+}
+.pw-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 15px;
+}
 .auth-skip {
   margin-top: 14px;
   background: none;
@@ -798,17 +867,6 @@ footer {
   flex: 1;
 }
 
-.map-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-  touch-action: none;
-  cursor: grab;
-}
-
-.map-canvas:active {
-  cursor: grabbing;
-}
 
 @media (max-width: 720px) {
   /* Globe is full-screen; the sidebar becomes a slide-in drawer. */

@@ -8,7 +8,7 @@ interface Props {
 
 // Turn transport failures (offline, sync server paused/unreachable) into guidance;
 // real auth errors such as "Invalid login credentials" pass through unchanged.
-function friendlyError(err: unknown): string {
+export function friendlyError(err: unknown): string {
   const e = err as { message?: string; name?: string } | null;
   const m = e?.message ?? String(err);
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -85,6 +85,7 @@ export default function AuthScreen({ onSkip }: Props) {
         <div className="auth-msg" role="status" aria-live="polite">{msg}</div>
 
         <button className="auth-skip" onClick={onSkip}>Continue without an account</button>
+        <div className="auth-skip-note">Without an account, marks are not saved when you close the app.</div>
       </div>
     </div>
   );

@@ -20,5 +20,3 @@ dev-dist/
 /android/
 /ios/
 *.apk
-# wrangler / cloudflare
-.wrangler/

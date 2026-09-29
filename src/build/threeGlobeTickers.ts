@@ -8,6 +8,8 @@
 // run for the life of the page and it never goes idle, even with the globe paused. Starting
 // every such ticker paused fixes it without timing tricks: the real globe resumes its
 // tickers through resumeAnimation() whenever it renders; the throwaway ones never are.
+// Reported upstream as https://github.com/vasturiano/three-globe/issues/119: drop this
+// patch (and its plugin in vite.config.ts) once three-globe disposes those instances.
 
 /** FrameTicker's constructor is (maxFPS?, minFPS?, paused?); undefined keeps its defaults. */
 const SITE = /new (FrameTicker(?:\$\d+)?)\(\)/g;

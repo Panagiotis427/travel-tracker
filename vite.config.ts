@@ -59,8 +59,8 @@ const cspMeta: Plugin = {
   },
 };
 
-// base './' keeps asset paths relative so the same build works on Cloudflare/GitHub
-// Pages, inside a Capacitor Android wrapper, and as an installable desktop PWA.
+// base './' keeps asset paths relative so the same build works from the GitHub Pages
+// sub-path, on any other static host, and as an installable desktop PWA.
 export default defineConfig({
   base: './',
   // The lazily loaded globe chunk (three.js) is ~2 MB, so warn only when a chunk would outgrow the

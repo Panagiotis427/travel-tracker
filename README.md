@@ -1,6 +1,6 @@
 # travel-tracker
 
-Private, open-source "scratch map" travel tracker rendered as a rotatable **3D globe**. $0 recurring cost. React + Vite + TypeScript; web now, Android (Capacitor) and desktop (installable PWA) later. iOS deferred.
+Private, open-source "scratch map" travel tracker rendered as a rotatable **3D globe**. $0 recurring cost. React + Vite + TypeScript, for the web and the desktop (installable PWA); native Android and iOS apps are not planned.
 
 Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 
@@ -15,7 +15,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Search + zoom-to-country, selection panel, status picker | Done |
 | Manual UI (Tier 0): status + dates/duration/note per place | Done |
 | Persistence (IndexedDB) + JSON export/import | Done |
-| EXIF import (Tier 1): drop photos -> auto-mark countries + regions | Done (web) |
+| EXIF import (Tier 1): drop photos -> auto-mark countries + regions, read in background workers | Done (web) |
 | PWA: installable + offline (service worker) | Done |
 | Polish: day/night globe, city/capital markers, multiple trips, mark-my-location | Done |
 | Unified zoom-LOD (countries -> Admin-1 -> Admin-2 counties, optional and viewport-culled), no drill modes | Done |
@@ -23,7 +23,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | Multi-person share links + compare overlays (no backend) | Done |
 | Accounts + cloud sync (Supabase, optional): offline edits and deletes retried, sync status shown | Live; without keys marks stay on the device (`docs/SUPABASE.md`) |
 | Unit tests (Vitest) + CI | Done |
-| Deploy (GitHub Pages / Cloudflare) + Capacitor Android | Ready — see `docs/DEPLOY.md` |
+| Deploy: GitHub Pages on every push to `main`; desktop = install the site as a PWA | Live — see `docs/DEPLOY.md` |
 
 ## Run it
 

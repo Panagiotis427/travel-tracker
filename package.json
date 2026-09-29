@@ -14,7 +14,6 @@
     "test": "vitest run",
     "geo": "npm --prefix tools/geo-pipeline run all && node tools/copy-geo.mjs",
     "icons": "node tools/gen-icons.mjs",
-    "deploy:cf": "npx wrangler pages deploy dist --project-name scratch-globe",
     "android:add": "npx cap add android",
     "android:sync": "npx cap sync",
     "android:open": "npx cap open android"

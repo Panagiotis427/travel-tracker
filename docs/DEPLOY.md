@@ -1,7 +1,7 @@
 # Deploy & package (all $0)
 
-The app builds to a static `dist/` and is an installable, offline PWA. Three
-distribution targets; each stays at zero recurring cost.
+The app builds to a static `dist/` and is an installable, offline PWA. It ships
+to the web and, installed from there, to the desktop, both at zero recurring cost.
 
 ## Web — GitHub Pages (recommended, you already use GitHub)
 
@@ -14,15 +14,10 @@ A workflow is included at `.github/workflows/deploy.yml`.
 `base: './'` in `vite.config.ts` makes the build work from the project sub-path,
 so no extra config is needed.
 
-## Web — Cloudflare Pages (best economics, commercial-OK, zero egress)
+## Web — other static hosts (alternative, not set up)
 
-Option A, CLI:
-```
-npm run build
-npx wrangler login          # one time
-npm run deploy:cf           # wrangler pages deploy dist --project-name scratch-globe
-```
-Option B, dashboard: connect the GitHub repo in Cloudflare Pages with build
+Any static host can serve `dist/`. Cloudflare Pages, for example (commercial use
+allowed, no egress fees): connect the GitHub repo in its dashboard with build
 command `npm run build` and output directory `dist`.
 
 ## Desktop
@@ -32,7 +27,8 @@ No separate build. Open the deployed site in Chrome/Edge and use the browser's
 
 ## Android — APK sideload
 
-Capacitor 8 is configured (`capacitor.config.ts`, appId `app.scratchglobe.travel`).
+Not planned: the owner's phone is an iPhone, and the web app installs there as a
+PWA. The steps below are kept for reference. Capacitor 8 is configured (`capacitor.config.ts`, appId `app.scratchglobe.travel`).
 The `android/` folder is generated (gitignored), not committed.
 
 **Requirements:** JDK **21** (Capacitor 8 needs 21, not 17) and the Android SDK
@@ -75,5 +71,5 @@ for full-library auto-scan.
 ## Notes
 - The service worker precaches the app shell + overview/mid globe layers; the
   10m layer, admin-1 files, and the Earth texture are cached on first use.
-- No backend is required. Everything is local-first; optional $0 cloud sync is
-  described in `BLUEPRINT.md` §10 if multi-device is ever wanted.
+- No backend is required. Everything is local-first; optional $0 accounts and
+  sync across devices are set up as in `docs/SUPABASE.md`.

@@ -8,6 +8,11 @@
 
 *Append-only. The body below is the single current plan.*
 
+**v3.2 (2026-09-29) — roadmap matches the shipped app**
+- Milestones 2, 3 (web), 4 (web and desktop) and 6 are done; GitHub Pages is the host. Cloudflare Pages stays a possible alternative host, and its unused deploy script is gone.
+- Native apps and background GPS are not planned: the owner's phone is an iPhone, and a native iOS app needs a paid Apple developer account.
+- Persistence is IndexedDB per account; the first-run migration moved the old localStorage store there.
+
 **v3.1 (2026-09-19) — framework + render locked, OSM evaluated**
 - **Framework locked: React + Vite + TypeScript** (not Flutter). Flutter/Dart were not installed and the owner's strong stack is JS/Next.js; React reuses the toolchain and skills, and the point-in-polygon engine is already JavaScript. Android later via Capacitor; desktop as an installable PWA.
 - **Render locked: a 3D WebGL globe** (globe.gl on three.js) — the owner wants a Google-Earth-style rotatable globe, not a flat map. Country polygons are colored by visit status and rise slightly when marked. A 2D equirectangular canvas remains as an optional alternate view.
@@ -31,7 +36,7 @@ A private, open-source scratch-map travel tracker with:
 - **Core visualization:** a rotatable 3D WebGL globe; countries are colored by visit status (visited / want / lived / transit) and pop up when marked.
 - **Data layer:** manual entry baseline, plus optional automated photo-EXIF import and optional background-GPS geofencing.
 - **Cost:** genuinely $0 recurring on all shipped targets (Web, Android, desktop). Optional multi-user cloud sync also stays $0 within free-tier ceilings (§10).
-- **Targets:** one React + TypeScript codebase — web now, Android via Capacitor, desktop as an installable PWA. iOS deferred.
+- **Targets:** one React + TypeScript codebase for the web and the desktop (installable PWA). Native Android and iOS apps are not planned (§11).
 
 ---
 
@@ -41,7 +46,7 @@ A private, open-source scratch-map travel tracker with:
 | :-- | :-- | :-- | :-- |
 | D1 | Framework | **React + Vite + TypeScript** | Installed toolchain + owner's stack; PIP already JS |
 | D2 | Render | **3D WebGL globe (globe.gl / three.js)** | Owner wants a Google-Earth-style globe |
-| D3 | Platforms | **Web + Android (Capacitor) + desktop PWA** (iOS deferred) | Every target is $0 |
+| D3 | Platforms | **Web + desktop PWA** (native apps not planned) | Every target is $0; the owner's phone is an iPhone, and a native iOS app needs a paid Apple developer account |
 | D4 | Ingestion | **Manual baseline + optional EXIF + optional background GPS** | Progressive permission model |
 | D5 | Data granularity | **Admin-0 world + on-demand Admin-1** | Full Admin-1 bundled is >150 MB |
 | D6 | Sharing | **Local-only default; optional $0 cloud sync/share** | Ship single-user first (§10) |
@@ -62,7 +67,7 @@ A private, open-source scratch-map travel tracker with:
 \** Android needs `ACCESS_MEDIA_LOCATION` (via a Capacitor plugin) or GPS is redacted.
 \*** Android background location needs `ACCESS_BACKGROUND_LOCATION`; use a DIY significant-change approach to avoid a paid plugin (§8).
 
-> iOS deferred. Same React/Capacitor codebase, so it is an add-on later (free 7-day resign or $99/yr).
+> Native apps are not planned (§11): the Android column records what a Capacitor build would add, and iOS would need a free 7-day resign or $99/yr.
 
 ---
 
@@ -80,7 +85,7 @@ Three archetypes: **polygon scratch maps** (Been, Visited, Mark O'Travel — our
 +---------------------------------------------------------------------------+
 |                        CLIENT (React + Vite + TS)                         |
 |                                                                           |
-|  Targets:  Web (now) | Android (Capacitor) | Desktop (installable PWA)     |
+|  Targets:  Web | Desktop (installable PWA)                                |
 |                                                                           |
 |  Render:                                                                  |
 |   • Primary: 3D WebGL globe — globe.gl on three.js                        |
@@ -93,7 +98,7 @@ Three archetypes: **polygon scratch maps** (Been, Visited, Mark O'Travel — our
 |       (classifies EXIF/GPS lat-lng -> country; globe clicks use the lib)  |
 |                                                                           |
 |  State: React hooks (upgrade to a store if needed)                        |
-|  Persistence (user data only): localStorage now -> IndexedDB / wa-sqlite  |
+|  Persistence (user data only): IndexedDB, per account                     |
 |  Geometry: bundled versioned TopoJSON assets loaded to memory            |
 +---------------------------------------------------------------------------+
                                     |
@@ -101,7 +106,7 @@ Three archetypes: **polygon scratch maps** (Been, Visited, Mark O'Travel — our
 +---------------------------------------------------------------------------+
 |                              DATA / DISTRIBUTION                           |
 |  Vector assets: Natural Earth (public domain), pre-simplified, in-repo     |
-|  Hosting (web): Cloudflare Pages / GitHub Pages ($0)                       |
+|  Hosting (web): GitHub Pages ($0)                                         |
 |  Sync (optional): §10 — local + JSON default; $0 cloud path available      |
 +---------------------------------------------------------------------------+
 ```
@@ -161,7 +166,7 @@ Permissions are requested only when a tier is enabled, never on first launch.
 - **Tier 1 — EXIF import (recommended opt-in).** Web: user selects/drag-drops photos, parsed client-side (File API + a JS EXIF reader), zero upload. Android (Capacitor): media-library scan with `ACCESS_MEDIA_LOCATION`. Desktop: picked folder / file upload. Pipeline: read lat/lng + `DateTimeOriginal` -> PIP -> upsert visit + store the raw point as evidence -> dedup per region per day. Privacy is the selling point: all on-device.
 - **Tier 2 — Background GPS (optional, experimental, Android).** DIY significant-change (Capacitor geolocation + `ACCESS_BACKGROUND_LOCATION`) to avoid a paid plugin; fix once on wake, PIP, store, release. Label experimental.
 
-Recommendation: ship Tiers 0 and 1; treat Tier 2 as a stretch.
+Tiers 0 and 1 ship; Tier 2 needs a native app and is not planned (§11).
 
 ---
 
@@ -174,7 +179,7 @@ Geometry lives in bundled assets; the database holds **user data only** — tiny
 - **evidence:** raw geotagged points (`lat`, `lng`, `taken_at`, `source`, `asset_ref`) to re-derive visits.
 - **app_meta:** `schema_version`, `geo_data_version`.
 
-Now = `localStorage` (`travel-tracker:statuses:v1`); next = IndexedDB (via `idb`) or `wa-sqlite`. Export/import = one JSON file; import merges by `id` with last-write-wins.
+Stored in IndexedDB (via `idb`), one record per place and account; the first-run migration moved the old `localStorage` store (`travel-tracker:statuses:v1`) there. Export/import = one JSON file; import merges by place with last-write-wins.
 
 ---
 
@@ -183,7 +188,7 @@ Now = `localStorage` (`travel-tracker:statuses:v1`); next = IndexedDB (via `idb`
 **Feasible at hobby-to-community scale**, because the heavy work (geometry, render, PIP, EXIF) is client-side and the map geometry ships in the app, so a backend only moves each user's tiny text payload.
 
 - **Free-tier options:** Supabase (Postgres 500 MB, 5 GB egress/mo, 50k MAU, auth + RLS + realtime; free projects pause after ~1 week idle), Firebase (Firestore ~50k reads/day), Cloudflare (Workers 100k req/day, D1 ~5 GB, **R2 zero egress fees**), Turso, Neon.
-- **Recommended:** Supabase (easiest) or Cloudflare (best economics, commercial-OK). Media on R2 (no egress fees).
+- **Recommended:** Supabase (easiest), which is what the app uses (`docs/SUPABASE.md`), or Cloudflare (best economics, commercial-OK). Media on R2 (no egress fees).
 - **Sharing, cheapest first:** private per-user sync -> public read-only snapshot links (no live backend load) -> social feeds (defer; burns quotas first).
 - **Three asterisks:** "$0" means within free-tier ceilings; egress is the first wall (mitigated by tiny payloads + R2); some free hosts ban commercial use (Vercel Hobby) — use Cloudflare if monetizing.
 
@@ -191,11 +196,13 @@ Now = `localStorage` (`travel-tracker:statuses:v1`); next = IndexedDB (via `idb`
 
 ## 11. Roadmap
 
-- **Milestone 1 — DONE.** Geo pipeline (NE -> TopoJSON), PIP engine (10/10 per layer), React + 3D globe shell (rotate/zoom/tap-to-cycle, live stats, localStorage).
-- **Milestone 2 — Data model & manual UI.** Region inspector (status/dates/duration/note), stats dashboard, JSON export/import, IndexedDB persistence.
-- **Milestone 3 — EXIF import (Tier 1).** Web upload + client-side parse first; Android via Capacitor later.
-- **Milestone 4 — Packaging.** Web to Cloudflare Pages; Android via Capacitor (needs Android SDK); desktop PWA.
-- **Optional M5** background GPS; **Optional M6** $0 cloud sync + public share links.
+- **Milestone 1 — DONE.** Geo pipeline (NE -> TopoJSON), PIP engine (10/10 per layer), React + 3D globe shell (rotate/zoom/tap-to-cycle, live stats).
+- **Milestone 2 — DONE.** Place panel (status, several trips with dates, duration and notes), stats, JSON export/import, IndexedDB persistence per account.
+- **Milestone 3 — DONE (web).** Dropped or picked photos are read on the device, in background workers (EXIF position and capture date), and mark their countries and regions; nothing is uploaded.
+- **Milestone 4 — DONE (web and desktop).** Web on GitHub Pages, deployed on every push to `main`; desktop is the installable, offline PWA.
+- **Milestone 6 — DONE.** Optional $0 accounts and cloud sync (Supabase, per account, offline changes retried) and share links with compare overlays (no backend).
+- **Not planned:** native Android and iOS apps, and background GPS (the old optional Milestone 5, which needs a native app). The owner's phone is an iPhone, and a native iOS app needs a paid Apple developer account. The Capacitor setup and the background-GPS plugin stay in the repository, unused.
+- **Done beyond the plan:** Admin-1 and Admin-2 zoom levels, a 2D map view, city and capital markers, unit tests and CI.
 
 ---
 

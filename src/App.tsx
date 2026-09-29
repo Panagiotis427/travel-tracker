@@ -44,6 +44,7 @@ const MARKER_KEY = 'travel-tracker:markers';
 const COUNTIES_KEY = 'travel-tracker:counties2'; // v2: default ON now that counties are viewport-culled
 const VIEW_KEY = 'travel-tracker:view';
 const LOCAL_UID = 'local'; // the single owner of the marks in a build without Supabase keys
+const PULL_RETRY_MS = 30_000; // first retry of a failed sign-in pull while online; doubles up to 5 min
 const OVERLAY_COLORS = ['#e74c3c', '#f1c40f', '#1abc9c', '#e67e22', '#9b59b6', '#16a085'];
 const BOTH_COLOR = '#8e44ad';
 
@@ -114,6 +115,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const userIdRef = useRef<string | null>(null);
   const syncedFor = useRef<string | null>(null); // whose sign-in pull is running or done; null again if it failed
+  const pullTimer = useRef<number | null>(null);
+  const pullBackoff = useRef(PULL_RETRY_MS);
   const visitsRef = useRef<VisitMap>({}); // latest marks, for retries fired outside React (the 'online' event)
   visitsRef.current = visits;
 
@@ -257,12 +260,25 @@ export default function App() {
     });
   }
 
+  // A sign-in pull that failed while online (a server error, not a lost connection) is
+  // tried again after a pause that doubles each time; the 'online' event covers the rest.
+  function retryPullLater() {
+    if (pullTimer.current !== null) return;
+    pullTimer.current = window.setTimeout(() => { pullTimer.current = null; setPullTry((n) => n + 1); }, pullBackoff.current);
+    pullBackoff.current = Math.min(pullBackoff.current * 2, 5 * 60_000);
+  }
+  function stopPullRetry() {
+    if (pullTimer.current !== null) { window.clearTimeout(pullTimer.current); pullTimer.current = null; }
+    pullBackoff.current = PULL_RETRY_MS;
+  }
+  useEffect(() => () => { if (pullTimer.current !== null) window.clearTimeout(pullTimer.current); }, []);
+
   // On login: pull the user's cloud data, merge it (last write wins), push what the cloud lacks.
   // Without Supabase keys there are no accounts, so marks are saved on the device under LOCAL_UID.
   useEffect(() => {
     const uid = session?.user?.id ?? (cloudEnabled ? null : LOCAL_UID);
     userIdRef.current = uid;
-    if (!uid) { syncedFor.current = null; setVisits({}); return; } // guest / logged out = empty, nothing saved
+    if (!uid) { stopPullRetry(); syncedFor.current = null; setVisits({}); return; } // guest / logged out = empty, nothing saved
     if (syncedFor.current === uid) return;
     syncedFor.current = uid;
     (async () => {
@@ -280,12 +296,15 @@ export default function App() {
       if (!remoteRaw) {
         // The cloud couldn't be read: keep this device's marks and send only what it changed
         // (merging "unreadable" as "empty" would re-push every row over newer ones). The
-        // pull is retried when the device comes back online, on the next sign-in or reload.
+        // pull is retried when the device comes back online, after a pause while it stays
+        // online, and on the next sign-in or reload.
         syncedFor.current = null;
         setVisits(local);
         void flushSync(uid, local);
+        if (navigator.onLine !== false) retryPullLater();
         return;
       }
+      stopPullRetry();
       // Push only local rows the cloud lacks or holds an older version of (e.g. edited here
       // offline), and drop the places deleted on another device since this one last
       // changed them, instead of pushing them back.

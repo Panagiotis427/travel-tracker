@@ -25,48 +25,12 @@ command `npm run build` and output directory `dist`.
 No separate build. Open the deployed site in Chrome/Edge and use the browser's
 **Install** action. It runs offline and gets its own window and icon.
 
-## Android — APK sideload
+## Android — not planned
 
-Not planned: the owner's phone is an iPhone, and the web app installs there as a
-PWA. The steps below are kept for reference. Capacitor 8 is configured (`capacitor.config.ts`, appId `app.scratchglobe.travel`).
-The `android/` folder is generated (gitignored), not committed.
-
-**Requirements:** JDK **21** (Capacitor 8 needs 21, not 17) and the Android SDK
-(platform + build-tools **35**, platform-tools). Android Studio bundles both.
-
-**Path caveat:** Gradle can misbehave when the project path contains a space. If a
-build fails oddly, copy or clone the project to a space-free path (e.g. `D:\code\travel-tracker`) and build
-there.
-
-**Easy path (Android Studio):**
-```
-npm run build
-npm run android:add        # npx cap add android   (first time only)
-npm run android:sync       # copy dist into the native project
-npm run android:open       # Build > Build Bundle(s)/APK(s) > Build APK(s)
-```
-
-**Headless path (no GUI):** install JDK 21 + SDK command-line tools, then:
-```
-set JAVA_HOME=...\jdk-21     ANDROID_SDK_ROOT=...\android-sdk
-sdkmanager --licenses
-sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-npm run build && npx cap sync android
-cd android && gradlew assembleDebug
-# APK: android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-**Background GPS permissions:** because `android/` is regenerated, re-add these to
-`android/app/src/main/AndroidManifest.xml` after `cap add` (already applied in the
-current tree): `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`,
-`ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`.
-The background-geolocation plugin declares `>=3.0.0` for Capacitor and compiles
-against the app's `capacitor-android` (v8); if a future plugin bump is needed,
-check `@capacitor-community/background-geolocation` for Capacitor-8 support.
-
-Photo EXIF import already works through the file picker in the Android WebView; a
-native media-library plugin (with `ACCESS_MEDIA_LOCATION`) is a later enhancement
-for full-library auto-scan.
+The owner's phone is an iPhone, and the web app installs there as a PWA. The
+unused Capacitor wrapper (its config, the android:* scripts, the packages and the
+background-GPS module) was removed; commit 89b7a85 still has it, with the APK build
+steps in this file.
 
 ## Notes
 - The service worker precaches the app shell + overview/mid globe layers; the

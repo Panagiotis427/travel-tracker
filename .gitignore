@@ -16,7 +16,7 @@ Thumbs.db
 dist/
 dev-dist/
 .dart_tool/
-# capacitor native projects (generated; rebuilt via `npx cap add`)
+# native projects of the removed Capacitor wrapper (never committed)
 /android/
 /ios/
 *.apk

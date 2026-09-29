@@ -24,7 +24,6 @@ import AuthScreen from './features/AuthScreen';
 import PasswordDialog from './features/PasswordDialog';
 import ShareDialog from './features/ShareDialog';
 import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
-import { isNative, startBackground, stopBackground } from './features/bgLocation';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
 const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
@@ -38,7 +37,6 @@ const OVERVIEW: Pov = { lat: 20, lng: 0, altitude: 2.3 };
 const EXPAND_ALT = 0.9;  // resolve into Admin-1
 const A2_ALT = 0.32;     // resolve into Admin-2
 const MAX_EXPANDED = 6;
-const BG_KEY = 'travel-tracker:bg';
 const WELCOME_KEY = 'travel-tracker:welcome';
 const MARKER_KEY = 'travel-tracker:markers';
 const COUNTIES_KEY = 'travel-tracker:counties2'; // v2: default ON now that counties are viewport-culled
@@ -81,7 +79,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
-  const [bgOn, setBgOn] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [markerMode, setMarkerMode] = useState<MarkerMode>(() => {
     try { const v = localStorage.getItem(MARKER_KEY); if (v === 'off' || v === 'selected' || v === 'all') return v; } catch { /* ignore */ }
@@ -645,16 +642,6 @@ export default function App() {
     );
   }
 
-  async function toggleBg() {
-    if (!isNative()) { window.alert('Background tracking runs in the Android app only. On web/desktop, use "Mark my location".'); return; }
-    if (bgOn) { await stopBackground(); setBgOn(false); try { localStorage.setItem(BG_KEY, '0'); } catch { /* ignore */ } }
-    else { const ok = await startBackground((la, ln) => { void markCoords(la, ln); }); setBgOn(ok); if (ok) try { localStorage.setItem(BG_KEY, '1'); } catch { /* ignore */ } }
-  }
-  useEffect(() => {
-    if (!isNative()) return;
-    try { if (localStorage.getItem(BG_KEY) === '1') startBackground((la, ln) => { void markCoords(la, ln); }).then(setBgOn); } catch { /* ignore */ }
-  }, [markCoords]);
-
   // --- sharing (backend-free) ---
   function shareMine() {
     if (!Object.keys(statuses).length) { setShareMsg('Nothing marked to share yet.'); return; }
@@ -885,7 +872,6 @@ export default function App() {
           <div className="actions">
           <button className="drill" onClick={() => setShowImport(true)}>Import photos</button>
           <button className="io" onClick={markLocation}>Mark my location</button>
-          <button className={bgOn ? 'io bg-on' : 'io'} onClick={toggleBg}>Background GPS: {bgOn ? 'On' : 'Off'}</button>
           {geoMsg && <div className="stat-label geo-msg">{geoMsg}</div>}
           <div className="io-row">
             <button className="io" onClick={() => setViewMode((v) => (v === 'globe' ? 'flat' : 'globe'))}>View: {viewMode === 'globe' ? '3D globe' : '2D map'}</button>

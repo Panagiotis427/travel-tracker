@@ -1,6 +1,6 @@
 # travel-tracker
 
-Private, open-source "scratch map" travel tracker rendered as a rotatable **3D globe**. $0 recurring cost. React + Vite + TypeScript, for the web and the desktop (installable PWA); native Android and iOS apps are not planned.
+Private, open-source "scratch map" travel tracker rendered as a rotatable **3D globe**. $0 recurring cost. React + Vite + TypeScript, for the web and the desktop (installable PWA); native Android and iOS apps are not planned, and the unused Capacitor wrapper was removed (git history can bring it back).
 
 Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 
@@ -67,7 +67,7 @@ travel-tracker/
       projection.ts        equirectangular forward/inverse (2D map)
       types.ts
     features/              sign-in screen, password and share dialogs, photo import
-                           (EXIF read in a worker pool), background GPS (unused)
+                           (EXIF read in a worker pool)
     build/                 build-time patch that starts three-globe's layer tickers paused
     lib/                   share links, fit-to-view maths, dates, Supabase client
     state/status.ts        status model, colors

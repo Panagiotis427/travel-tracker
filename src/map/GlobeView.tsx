@@ -101,7 +101,6 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .polygonSideColor(() => null as unknown as string)
       .polygonStrokeColor(strokeColor)
       .polygonAltitude(0.002)
-      .polygonCapCurvatureResolution(10) // coarser cap tessellation (default 5) = fewer triangles, faster geometry build; invisible on a near-flat map
       .onPolygonClick((d: unknown) => cbRef.current.onPick(idOf(d)))
       .onPolygonHover((d: unknown) => {
         // No recolor here (that re-renders every polygon per hover = laggy).

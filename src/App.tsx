@@ -8,7 +8,7 @@ import { initCountryIndex, classifyCountry, classifyRegion } from './map/classif
 import { bboxOf } from './map/pip';
 import { boundsOf } from './lib/geo-util';
 import type { Pov, Bounds } from './lib/geo-util';
-import { durationDays, fmtDuration, minIso, maxIso, isoDate, isoTime } from './lib/dates';
+import { durationDays, distinctTripDays, fmtDuration, minIso, maxIso, isoDate, isoTime } from './lib/dates';
 import { encodeShare, decodeShare, extractCode } from './lib/share';
 import { STATUS_META, UNVISITED_COLOR, normalizeVisit } from './state/status';
 import type { Status, StatusMap, Visit, VisitMap, Trip } from './state/status';
@@ -660,14 +660,15 @@ export default function App() {
 
   const stats = useMemo(() => {
     const been = new Set<string>();
-    let regionsMarked = 0, totalDays = 0;
+    let regionsMarked = 0;
     const counts: Record<Status, number> = { visited: 0, want: 0, lived: 0, transit: 0 };
     for (const [id, v] of Object.entries(visits)) {
       counts[v.status]++;
-      for (const t of v.trips) { const d = durationDays(t.start, t.end); if (d) totalDays += d; }
       if (id.includes('-')) regionsMarked++;
       if (v.status === 'visited' || v.status === 'lived') been.add(id.includes('-') ? id.split('-')[0] : id);
     }
+    // Distinct days, not a sum: a country and its region marked for one visit is one day.
+    const totalDays = distinctTripDays(Object.values(visits).flatMap((v) => v.trips));
     let countriesBeen = 0;
     for (const a3 of been) if (meta[a3]?.sov ?? true) countriesBeen++;
     return { countriesBeen, regionsMarked, totalDays, counts };

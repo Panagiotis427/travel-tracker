@@ -95,7 +95,10 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       .atmosphereAltitude(0.18)
       .polygonsTransitionDuration(0)
       .polygonCapColor(capColor)
-      .polygonSideColor(() => 'rgba(0,0,0,0)') // invisible sides = flat caps, no 3D walls
+      // No side walls at all. three-globe builds sides whenever the accessor returns a
+      // truthy value, so the old 'rgba(0,0,0,0)' still built, drew and depth-sorted an
+      // invisible transparent wall for every polygon on every frame. null = cap only.
+      .polygonSideColor(() => null as unknown as string)
       .polygonStrokeColor(strokeColor)
       .polygonAltitude(0.002)
       .polygonCapCurvatureResolution(10) // coarser cap tessellation (default 5) = fewer triangles, faster geometry build; invisible on a near-flat map

@@ -170,16 +170,23 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
     // and doesn't thermal-throttle -> everything else feels faster.
     const anim = globe as unknown as { pauseAnimation?: () => void; resumeAnimation?: () => void };
     let idleTimer = 0;
+    let resuming = false;
     const wake = (ms = 700) => {
-      anim.resumeAnimation?.();
+      // resumeAnimation() renders its first frame synchronously, and globe.gl stores that
+      // frame's id only afterwards. A 'change' fired inside that frame must not resume again:
+      // that starts a second frame chain which pauseAnimation() can no longer cancel.
+      if (!resuming) {
+        resuming = true;
+        try { anim.resumeAnimation?.(); } finally { resuming = false; }
+      }
       clearTimeout(idleTimer);
       idleTimer = window.setTimeout(() => { if (!controls.autoRotate) anim.pauseAnimation?.(); }, ms);
     };
     wakeRef.current = wake;
     // Wake only when the camera really moved. Parked at maxDistance, OrbitControls can
     // re-clamp the radius by one floating-point step on every update and report it as a
-    // zoom (it compares the radii exactly). Waking on those kept the globe rendering with
-    // nothing moving, and waking a paused globe there recursed until the stack overflowed.
+    // zoom (it compares the radii exactly); waking on those kept the globe rendering with
+    // nothing moving.
     const cam = globe.camera();
     const lastPos = cam.position.clone();
     const lastQuat = cam.quaternion.clone();

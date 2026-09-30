@@ -176,7 +176,19 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
       idleTimer = window.setTimeout(() => { if (!controls.autoRotate) anim.pauseAnimation?.(); }, ms);
     };
     wakeRef.current = wake;
-    const onChange = () => wake();
+    // Wake only when the camera really moved. Parked at maxDistance, OrbitControls can
+    // re-clamp the radius by one floating-point step on every update and report it as a
+    // zoom (it compares the radii exactly). Waking on those kept the globe rendering with
+    // nothing moving, and waking a paused globe there recursed until the stack overflowed.
+    const cam = globe.camera();
+    const lastPos = cam.position.clone();
+    const lastQuat = cam.quaternion.clone();
+    const onChange = () => {
+      if (cam.position.distanceToSquared(lastPos) < 1e-12 && 1 - Math.abs(cam.quaternion.dot(lastQuat)) < 1e-14) return;
+      lastPos.copy(cam.position);
+      lastQuat.copy(cam.quaternion);
+      wake();
+    };
     controls.addEventListener?.('change', onChange); // fires each frame during drag/zoom/damping
     // On phones, hide marker labels while dragging: each label is a draw call, so many of
     // them stutter the drag. Restore on release (a brief rebuild, but the drag is smooth).

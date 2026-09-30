@@ -7,6 +7,7 @@ import type { CityMarker } from './cities';
 import type { StatusMap } from '../state/status';
 import { STATUS_META, UNVISITED_COLOR } from '../state/status';
 import type { Pov, Bounds } from '../lib/geo-util';
+import { webglAvailable } from '../lib/webgl';
 
 function lighten(hex: string, amt: number): string {
   const h = hex.replace('#', '');
@@ -84,6 +85,10 @@ export default function GlobeView({ polygons, statuses, selectedId, globeImage, 
   };
 
   useEffect(() => {
+    // Without WebGL, new Globe() throws only after globe.gl has built its three-globe layers,
+    // whose animation tickers then run with nothing left to stop them. Fail before that, and
+    // let GlobeBoundary offer the 2D map.
+    if (!webglAvailable()) throw new Error('WebGL is not available in this browser');
     const el = elRef.current!;
     const isMobileGl = window.matchMedia?.('(max-width: 720px)').matches ?? false;
     // logarithmicDepthBuffer stops the country polygons (which sit a hair above the

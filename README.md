@@ -19,7 +19,7 @@ Design blueprint: `docs/BLUEPRINT.md` (v3.1).
 | PWA: installable + offline (service worker); an open page switches to a new deploy by itself, and the sidebar shows the build | Done |
 | Polish: day/night globe, city/capital markers, multiple trips, mark-my-location | Done |
 | Unified zoom-LOD (countries -> Admin-1 -> Admin-2 counties, optional and viewport-culled), no drill modes | Done |
-| 2D map view (canvas, no three.js) for weak devices | Done |
+| 2D map view (canvas, no three.js) for weak devices, and the fallback when the globe can't run | Done |
 | Multi-person share links + compare overlays (no backend) | Done |
 | Accounts + cloud sync (Supabase, optional): offline edits and deletes retried, a delete sticks on every device, sync status shown | Live; without keys marks stay on the device (`docs/SUPABASE.md`) |
 | Unit tests (Vitest) + CI | Done |
@@ -60,6 +60,7 @@ travel-tracker/
     map/
       GlobeView.tsx        3D globe (globe.gl / three.js) — primary view
       FlatMapView.tsx      2D equirectangular canvas map (no three.js)
+      GlobeBoundary.tsx    keeps a globe failure (no WebGL, an error) inside the map area
       geo.ts               load TopoJSON -> features / regions
       classify.ts          which country/region a lat/lng is in (EXIF, GPS, zoom)
       cities.ts            city/capital markers, zoom-gated
@@ -68,7 +69,7 @@ travel-tracker/
       types.ts
     features/              sign-in screen, password and share dialogs, photo import
                            (EXIF read in a worker pool)
-    lib/                   share links, fit-to-view maths, dates, Supabase client
+    lib/                   share links, fit-to-view maths, dates, WebGL check, Supabase client
     state/status.ts        status model, colors
     state/db.ts            IndexedDB storage, per account
     state/cloud.ts         optional Supabase sync: pull, push, soft deletes
@@ -90,7 +91,9 @@ country polygons (caps only, no side walls) colored by visit status, orbit contr
 and an atmosphere glow on larger screens. It renders only while something moves, so
 an idle globe costs no GPU time, and the intro spin stops by itself after 8 s. The
 three.js chunk (~550 KB gz) is code-split so the shell (~150 KB gz with the Supabase
-client) paints immediately; the 2D map view never loads it.
+client) paints immediately; the 2D map view never loads it. When the globe can't run
+(a browser without WebGL, a chunk that fails to download, an error in the globe), the
+map area says so and offers the 2D map; the rest of the app keeps working.
 
 **OpenStreetMap** was evaluated and not used: OSM tiles are a 2D Mercator basemap
 that globe.gl cannot drape on a sphere, and a country-level scratch map needs no

@@ -202,7 +202,7 @@ Stored in IndexedDB (via `idb`), one record per place and account; the first-run
 - **Milestone 4 — DONE (web and desktop).** Web on GitHub Pages, deployed on every push to `main`; desktop is the installable, offline PWA.
 - **Milestone 6 — DONE.** Optional $0 accounts and cloud sync (Supabase, per account, offline changes retried) and share links with compare overlays (no backend).
 - **Not planned:** native Android and iOS apps, and background GPS (the old optional Milestone 5, which needs a native app). The owner's phone is an iPhone, and a native iOS app needs a paid Apple developer account. The Capacitor setup and the background-GPS plugin were removed from the repository; git history can bring them back.
-- **Done beyond the plan:** Admin-1 and Admin-2 zoom levels, a 2D map view, city and capital markers, unit tests and CI.
+- **Done beyond the plan:** Admin-1 and Admin-2 zoom levels, a 2D map view (also the fallback when a browser has no WebGL or the globe fails), city and capital markers, unit tests and CI.
 
 ---
 

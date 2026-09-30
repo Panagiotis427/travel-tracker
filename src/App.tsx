@@ -24,6 +24,7 @@ import AuthScreen from './features/AuthScreen';
 import PasswordDialog from './features/PasswordDialog';
 import ShareDialog from './features/ShareDialog';
 import FlatMapView from './map/FlatMapView'; // light (no three.js): rendered directly so 2D mode never loads the globe chunk
+import GlobeBoundary from './map/GlobeBoundary';
 
 const GlobeView = lazy(() => import('./map/GlobeView'));
 const ImportPhotos = lazy(() => import('./features/ImportPhotos'));
@@ -916,9 +917,11 @@ export default function App() {
           </div>
         )}
         {viewMode === 'globe' ? (
-          <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-            <GlobeView polygons={renderFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
-          </Suspense>
+          <GlobeBoundary onUseFlat={() => setViewMode('flat')}>
+            <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
+              <GlobeView polygons={renderFeatures} statuses={statuses} selectedId={selectedId} globeImage={globeImage} onPick={pick} onDeselect={() => setSelectedId(null)} onHover={setHoveredId} onZoom={onZoom} pov={pov} colorOverride={colorOverride} markers={visibleMarkers} onMarkerPick={pick} fit={fit} viewAltitude={zoomAlt} emphasizeA3={selectedA3} />
+            </Suspense>
+          </GlobeBoundary>
         ) : (
           <FlatMapView polygons={renderFeatures} statuses={statuses} selectedId={selectedId} onPick={pick} onDeselect={() => setSelectedId(null)} colorOverride={colorOverride} markers={flatMarkerPool} onView={onZoom} />
         )}

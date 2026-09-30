@@ -196,6 +196,28 @@ footer {
   font-size: 14px;
 }
 
+/* the 3D globe failed (no WebGL, or an error): a message and a way on, inside the map area */
+.globe-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text);
+  font-size: 14px;
+}
+.globe-error p {
+  margin: 0;
+  max-width: 34em;
+}
+.globe-error .io-row {
+  width: min(100%, 24em);
+}
+
 /* on-map selected-place banner (HTML overlay, never occluded by the globe) */
 .map-banner {
   position: absolute;

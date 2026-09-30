@@ -1,35 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-import { startThreeGlobeTickersPaused, EXPECTED_SITES, THREE_GLOBE_ENTRY } from './src/build/threeGlobeTickers';
-
-// Start three-globe's layer tickers paused (see src/build/threeGlobeTickers.ts). The build
-// fails if the number of patched sites changes, so a three-globe upgrade can't silently
-// bring back the idle requestAnimationFrame loops.
-function patchedThreeGlobe(code: string, where: string): string {
-  const r = startThreeGlobeTickersPaused(code);
-  if (r.count !== EXPECTED_SITES) {
-    throw new Error(`three-globe ticker patch: expected ${EXPECTED_SITES} FrameTicker sites, found ${r.count} in ${where}; review src/build/threeGlobeTickers.ts`);
-  }
-  return r.code;
-}
-let sawThreeGlobe = false;
-const pauseThreeGlobeTickers: Plugin = {
-  name: 'pause-three-globe-tickers',
-  apply: 'build', // dev pre-bundling is patched by the esbuild hook in optimizeDeps below
-  enforce: 'pre',
-  transform(code, id) {
-    if (!THREE_GLOBE_ENTRY.test(id.split('?')[0])) return null;
-    sawThreeGlobe = true;
-    return { code: patchedThreeGlobe(code, id), map: null };
-  },
-  // A patch that silently stops matching would ship the idle loops again: fail instead.
-  buildEnd(err) {
-    if (!err && !sawThreeGlobe) this.error('three-globe ticker patch: three-globe was never transformed; check THREE_GLOBE_ENTRY in src/build/threeGlobeTickers.ts');
-  },
-};
 
 // Content-Security-Policy for the built app. GitHub Pages can't send headers, so it's a
 // <meta> tag, injected at build time only: the dev server relies on an inline script
@@ -70,23 +42,7 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 3000 },
   server: { port: 5180, strictPort: false },
   preview: { port: 4180, strictPort: false },
-  // The dev server pre-bundles dependencies with esbuild, which skips Vite transforms, so
-  // apply the same patch there too and keep `npm run dev` identical to the build.
-  optimizeDeps: {
-    esbuildOptions: {
-      plugins: [{
-        name: 'pause-three-globe-tickers',
-        setup(b) {
-          b.onLoad({ filter: THREE_GLOBE_ENTRY }, async (args) => ({
-            contents: patchedThreeGlobe(await readFile(args.path, 'utf8'), args.path),
-            loader: 'js',
-          }));
-        },
-      }],
-    },
-  },
   plugins: [
-    pauseThreeGlobeTickers,
     cspMeta,
     react(),
     VitePWA({

@@ -68,7 +68,6 @@ travel-tracker/
       types.ts
     features/              sign-in screen, password and share dialogs, photo import
                            (EXIF read in a worker pool)
-    build/                 build-time patch that starts three-globe's layer tickers paused
     lib/                   share links, fit-to-view maths, dates, Supabase client
     state/status.ts        status model, colors
     state/db.ts            IndexedDB storage, per account
